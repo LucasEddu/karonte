@@ -153,6 +153,35 @@ function App() {
 
   const handleLogout = () => setCurrentUser(null);
 
+  // --------- ADMIN PANEL LOGIC ---------
+  const handleToggleUserStatus = (id) => {
+    if (id === currentUser.id) return alert('Você não pode bloquear a si mesmo.');
+    setUsers(users.map(u => u.id === id ? { ...u, active: !u.active } : u));
+  };
+
+  const handleEditUsername = (id, currentUsername) => {
+    const newName = prompt(`Novo nome de usuário (atual: ${currentUsername}):`, currentUsername);
+    if (!newName || newName === currentUsername) return;
+    if (users.some(u => u.username === newName && u.id !== id)) return alert('Este nome já está em uso.');
+    setUsers(users.map(u => u.id === id ? { ...u, username: newName } : u));
+    if (currentUser.id === id) setCurrentUser({...currentUser, username: newName});
+  };
+
+  const handleResetPassword = (id, username) => {
+    const newPass = prompt(`Nova senha para ${username} (a senha atual não é exibida):`);
+    if (!newPass) return;
+    setUsers(users.map(u => u.id === id ? { ...u, password: newPass } : u));
+    alert(`Senha atualizada com sucesso.`);
+    if (currentUser.id === id) setCurrentUser({...currentUser, password: newPass});
+  };
+
+  const handleChangeOwnPassword = () => {
+    const newPass = prompt('Sua nova senha de administrador:');
+    if (!newPass) return;
+    setUsers(users.map(u => u.id === currentUser.id ? { ...u, password: newPass } : u));
+    setCurrentUser({...currentUser, password: newPass});
+    alert('Sua senha foi alterada com sucesso.');
+  };
 
   // --------- TRANSACTION FORM MASK & LOGIC ---------
   const handleAmountChange = (e) => {
@@ -364,7 +393,10 @@ function App() {
               <span>Gestão de Sistema</span>
             </div>
           </div>
-          <button onClick={handleLogout} className="logout-btn">Sair</button>
+          <div className="top-actions">
+            <button onClick={handleChangeOwnPassword} className="text-btn" style={{marginRight: 15, color: 'var(--text-secondary)'}}>Alterar Senha Admin</button>
+            <button onClick={handleLogout} className="logout-btn">Sair</button>
+          </div>
         </header>
 
         <main className="main-content padding-container">
@@ -379,15 +411,28 @@ function App() {
                       <th>Usuário</th>
                       <th>Role</th>
                       <th>Status</th>
+                      <th style={{textAlign: 'right'}}>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {users.map(u => (
                       <tr key={u.id}>
-                        <td>{u.username}</td>
-                        <td>{u.role}</td>
+                        <td>
+                          {u.username}
+                          {u.id === currentUser.id && <span style={{marginLeft: 8, fontSize: 10, color: 'var(--text-tertiary)'}}>(Você)</span>}
+                        </td>
+                        <td>{u.role === 'admin' ? 'Administrador' : 'Usuário'}</td>
                         <td style={{color: u.active ? 'var(--success-color)' : 'var(--danger-color)'}}>
                            {u.active ? 'Ativo' : 'Bloqueado'}
+                        </td>
+                        <td style={{textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end'}}>
+                           <button className="text-btn" onClick={() => handleEditUsername(u.id, u.username)} title="Alterar Login">Editar Nome</button>
+                           <button className="text-btn" onClick={() => handleResetPassword(u.id, u.username)} title="Alterar Senha">Resetar Senha</button>
+                           {u.id !== currentUser.id && (
+                             <button className="text-btn" onClick={() => handleToggleUserStatus(u.id)} style={{color: u.active ? 'var(--danger-color)' : 'var(--success-color)'}}>
+                                {u.active ? 'Inativar' : 'Ativar'}
+                             </button>
+                           )}
                         </td>
                       </tr>
                     ))}
