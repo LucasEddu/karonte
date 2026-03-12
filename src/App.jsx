@@ -324,24 +324,149 @@ function App() {
     });
   };
 
-  // --------- EXPORT ---------
-  const exportToCSV = () => {
-    if(filteredTransactions.length === 0) return;
-    
-    const headers = "Data,Tipo,Categoria,Descricao,Valor\n";
-    const csvContent = headers + filteredTransactions.map(t => {
-      return `${t.displayDate},${t.type === 'income' ? 'Receita' : 'Despesa'},${t.category},"${t.description}",${t.amount}`;
-    }).join("\n");
+  // --------- CHATBOT ---------
+  const [chatMessages, setChatMessages] = useState([
+    { id: 'welcome', sender: 'bot', text: 'Olá! Sou seu assistente. Me mande algo como "cinema 50" ou me pergunte "qual meu saldo?".' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [pendingAction, setPendingAction] = useState(null);
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `extrato_${selectedMonth}_${selectedYear}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const processChatMessage = (text) => {
+    // 1. Lowercase and Basic Parsing
+    const normalized = text.toLowerCase().trim();
+    
+    // Check for contextual questions
+    if (normalized.includes('meu saldo') || normalized.includes('saldo atual')) {
+       return { type: 'answer', text: `Seu saldo atual neste período é de R$ ${formatMoney(balance)}.` };
+    }
+    if (normalized.includes('quanto gastei') || normalized.includes('total de saídas')) {
+       return { type: 'answer', text: `Você gastou R$ ${formatMoney(totalExpense)} nas despesas deste mês.` };
+    }
+
+    // 2. Data Extraction via Regex
+    // Look for the first float or integer
+    const moneyMatch = normalized.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,2})?)/);
+    if (!moneyMatch) {
+       return { type: 'answer', text: 'Desculpe, não consegui identificar um valor (ex: "50", "120.50"). Pode tentar novamente?' };
+    }
+
+    const valueStr = moneyMatch[1].replace(',', '.');
+    const numericValue = parseFloat(valueStr);
+
+    // Remove the number from text to get description
+    let desc = normalized.replace(moneyMatch[0], '').trim();
+    if (desc.startsWith('-') || desc.startsWith('com ')) desc = desc.substring(1).trim();
+    if (!desc) desc = 'Registro via Assistente';
+
+    // 3. Inference rules
+    const incomeKeywords = ['salário', 'salario', 'freelance', 'receita', 'renda', 'bônus', 'bonus', 'pagamento'];
+    let inferType = 'expense';
+    
+    // Check type
+    if (incomeKeywords.some(kw => normalized.includes(kw))) {
+       inferType = 'income';
+    }
+
+    // Check category mapping
+    let inferCategory = 'Outros';
+    if (inferType === 'expense') {
+       if (/(academia|cinema|bar|lazer|balada|jogo)/.test(normalized)) inferCategory = 'Lazer';
+       else if (/(mercado|supermercado|restaurante|pizza|ifood|lanche|comida|padaria)/.test(normalized)) inferCategory = 'Alimentação';
+       else if (/(aluguel|reforma|condomínio|condominio|luz|água|agua|conta)/.test(normalized)) inferCategory = 'Moradia';
+       else if (/(farmácia|farmacia|médico|medico|consulta|remédio|remedio)/.test(normalized)) inferCategory = 'Saúde';
+       else if (/(transporte|uber|99|gasolina|combustível|onibus|ônibus|metro|metrô)/.test(normalized)) inferCategory = 'Transporte';
+    } else {
+       if (/(salário|salario)/.test(normalized)) inferCategory = 'Salário';
+       else if (/(freelance)/.test(normalized)) inferCategory = 'Freelance';
+    }
+
+    // Capitalize first letter of description for beauty
+    desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+
+    return {
+       type: 'action',
+       text: 'Entendi! Deseja registrar a seguinte movimentação?',
+       payload: {
+          description: desc,
+          amount: numericValue,
+          type: inferType,
+          category: inferCategory
+       }
+    };
+  };
+
+  const handleChatSubmit = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim()) return;
+
+    // Reject new input if there is a pending confirmation
+    if (pendingAction) {
+       if (chatInput.toLowerCase() === 'sim') { handleChatConfirm(); return; }
+       if (chatInput.toLowerCase() === 'não' || chatInput.toLowerCase() === 'nao') { handleChatCancel(); return; }
+       alert("Por favor, confirme (sim) ou cancele (não) a ação atual antes de enviar outra mensagem.");
+       return;
+    }
+
+    const userMsg = { id: crypto.randomUUID(), sender: 'user', text: chatInput };
+    setChatMessages(prev => [...prev, userMsg]);
+    
+    // Process NLP
+    const response = processChatMessage(chatInput);
+    setChatInput('');
+
+    setTimeout(() => {
+       const botMsg = { id: crypto.randomUUID(), sender: 'bot', text: response.text };
+       setChatMessages(prev => [...prev, botMsg]);
+
+       if (response.type === 'action') {
+          setPendingAction(response.payload);
+       }
+    }, 600); // Artificial thinking delay
+  };
+
+  const handleChatConfirm = () => {
+     if (!pendingAction) return;
+     
+     const now = new Date();
+     const isCurrentPeriod = (selectedMonth === now.getMonth() + 1) && (selectedYear === now.getFullYear());
+     const dateObj = isCurrentPeriod ? now : new Date(selectedYear, selectedMonth - 1, 1, 12, 0, 0); 
+
+     const newTransaction = {
+      id: crypto.randomUUID(),
+      userId: currentUser.id,
+      description: pendingAction.description,
+      amount: pendingAction.amount,
+      type: pendingAction.type,
+      category: pendingAction.category,
+      isRecurring: false,
+      date: dateObj.toISOString(), 
+      displayDate: dateObj.toLocaleDateString('pt-BR')
+    };
+    
+    setTransactions([newTransaction, ...transactions]);
+    setPendingAction(null);
+    setChatInput('');
+
+    setChatMessages(prev => [
+       ...prev, 
+       { id: crypto.randomUUID(), sender: 'user', text: 'Sim' }, // Visual feedback
+       { id: crypto.randomUUID(), sender: 'bot', text: `Feito! Registrei ${pendingAction.type === 'income' ? 'a receita' : 'a despesa'} com sucesso no seu dashboard.` }
+    ]);
+  };
+
+  const handleChatCancel = () => {
+    setPendingAction(null);
+    setChatInput('');
+    setChatMessages(prev => [
+       ...prev, 
+       { id: crypto.randomUUID(), sender: 'user', text: 'Não' }, // Visual feedback
+       { id: crypto.randomUUID(), sender: 'bot', text: 'Tudo bem, registro cancelado.' }
+    ]);
+  };
+
+  const chatSuggestionClick = (txt) => {
+     if(pendingAction) return;
+     setChatInput(txt);
   };
 
 
@@ -501,157 +626,219 @@ function App() {
         </header>
 
         {currentView === 'dashboard' && (
-          <main className="main-content">
-            
-            <section className="dashboard-grid">
-              
-              <div className="card grid-card">
-                <div className="balance-label">SALDO ATUAL</div>
-                <div className="balance-value">R$ {formatMoney(balance)}</div>
-                <div className="mini-cards-container">
-                  <div className="mini-card income">
-                    <span className="mini-label">Entradas</span>
-                    <span className="mini-value income">R$ {formatMoney(totalIncome)}</span>
-                  </div>
-                  <div className="mini-card expense">
-                    <span className="mini-label">Saídas</span>
-                    <span className="mini-value expense">R$ {formatMoney(totalExpense)}</span>
+          <div className="dashboard-layout">
+            <main className="dashboard-main main-content">
+              <section className="dashboard-grid">
+                <div className="card grid-card">
+                  <div className="balance-label">SALDO ATUAL</div>
+                  <div className="balance-value">R$ {formatMoney(balance)}</div>
+                  <div className="mini-cards-container">
+                    <div className="mini-card income">
+                      <span className="mini-label">Entradas</span>
+                      <span className="mini-value income">R$ {formatMoney(totalIncome)}</span>
+                    </div>
+                    <div className="mini-card expense">
+                      <span className="mini-label">Saídas</span>
+                      <span className="mini-value expense">R$ {formatMoney(totalExpense)}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="card grid-card">
-                <div className="card-title">Despesas por Categoria (Top 3)</div>
-                <div className="category-list">
-                  {categoryStats.length === 0 ? (
-                     <div style={{fontSize: 11, color: 'var(--text-tertiary)'}}>Nenhuma despesa no mês.</div>
-                  ) : (
-                    categoryStats.slice(0, 3).map((item, index) => {
-                      const budgetInfo = getCategoryBudgetInfo(item.name, item.total);
-                      const isUnbudgeted = budgetInfo.limit === 0;
-                      
-                      // visual percentage falls back to just relative size if no budget
-                      let visualPct = isUnbudgeted ? Math.min((item.total / totalExpense)*100, 100) : budgetInfo.pct;
-                      const color = budgetInfo.isOver100 ? 'var(--danger-color)' : getCatColor(index);
+                <div className="card grid-card">
+                  <div className="card-title">Despesas por Categoria (Top 3)</div>
+                  <div className="category-list">
+                    {categoryStats.length === 0 ? (
+                       <div style={{fontSize: 11, color: 'var(--text-tertiary)'}}>Nenhuma despesa no mês.</div>
+                    ) : (
+                      categoryStats.slice(0, 3).map((item, index) => {
+                        const budgetInfo = getCategoryBudgetInfo(item.name, item.total);
+                        const isUnbudgeted = budgetInfo.limit === 0;
+                        
+                        let visualPct = isUnbudgeted ? Math.min((item.total / totalExpense)*100, 100) : budgetInfo.pct;
+                        const color = budgetInfo.isOver100 ? 'var(--danger-color)' : getCatColor(index);
 
-                      return (
-                        <div key={item.name} className="cat-item">
-                          <div className="cat-header">
-                            <span className="cat-name">{item.name}</span>
-                            <div>
-                              {budgetInfo.isOver80 && <span className="badge-alert">{visualPct.toFixed(0)}% Util</span>}
-                              <span className="cat-value" style={{color: color}}>R$ {formatMoney(item.total)}</span>
+                        return (
+                          <div key={item.name} className="cat-item">
+                            <div className="cat-header">
+                              <span className="cat-name">{item.name}</span>
+                              <div>
+                                {budgetInfo.isOver80 && <span className="badge-alert">{visualPct.toFixed(0)}% Util</span>}
+                                <span className="cat-value" style={{color: color}}>R$ {formatMoney(item.total)}</span>
+                              </div>
+                            </div>
+                            <div className="progress-bg" title={!isUnbudgeted ? `Limite: R$ ${budgetInfo.limit}` : ''}>
+                              <div className="progress-fill" style={{width: `${visualPct}%`, backgroundColor: color}}></div>
                             </div>
                           </div>
-                          <div className="progress-bg" title={!isUnbudgeted ? `Limite: R$ ${budgetInfo.limit}` : ''}>
-                            <div className="progress-fill" style={{width: `${visualPct}%`, backgroundColor: color}}></div>
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
+                        )
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <div className="card grid-card">
-                <div className="card-title">Resumo Mensal ({new Date(selectedYear, selectedMonth-1).toLocaleString('pt-BR', { month: 'short' })})</div>
-                <div className="goals-list">
-                  {/* Reuse goal layout to show period summary */}
-                  <div className="goal-card" style={{backgroundColor: 'var(--bg-color)', border: '0.5px solid var(--border-color)'}}>
-                    <div className="goal-header">
-                      <span className="goal-name-target">Balanço do Período</span>
-                      <span className="goal-percent" style={{color: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}>
-                        {balance >= 0 ? '+' : ''}{((balance / (totalIncome || 1)) * 100).toFixed(0)}%
-                      </span>
+                <div className="card grid-card">
+                  <div className="card-title">Resumo Mensal</div>
+                  <div className="goals-list">
+                    <div className="goal-card" style={{backgroundColor: 'var(--bg-color)', border: '0.5px solid var(--border-color)'}}>
+                      <div className="goal-header">
+                        <span className="goal-name-target">Balanço do Período</span>
+                        <span className="goal-percent" style={{color: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}>
+                          {balance >= 0 ? '+' : ''}{((balance / (totalIncome || 1)) * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="progress-bg" style={{height: 2}}>
+                        <div className="progress-fill" style={{width: '100%', backgroundColor: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}></div>
+                      </div>
                     </div>
-                    <div className="progress-bg" style={{height: 2}}>
-                      <div className="progress-fill" style={{width: '100%', backgroundColor: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}></div>
+                    
+                    <div style={{fontSize: 10, color: 'var(--text-tertiary)', padding: '5px', lineHeight: 1.4}}>
+                      Este mês você gastou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalExpense)}</span> e 
+                      arrecadou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalIncome)}</span>.
+                      {balance < 0 && <span style={{color: 'var(--danger-color)'}}><br/>Déficit Operacional detectado.</span>}
                     </div>
+                  </div>
+                </div>
+              </section>
+
+              <section className="card form-section">
+                <form onSubmit={handleAddTransaction} className="transaction-form" style={{gridTemplateColumns: '2fr 1fr 1fr 1fr auto'}}>
+                  <div className="form-group">
+                    <label>Descrição</label>
+                    <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Conta de Luz" required />
+                    {type === 'expense' && (
+                       <label className="checkbox-label" style={{display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', marginTop: 4}}>
+                          <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} style={{width: 'auto', margin: 0}} />
+                          Repetir mensamente
+                       </label>
+                    )}
                   </div>
                   
-                  <div style={{fontSize: 10, color: 'var(--text-tertiary)', padding: '5px', lineHeight: 1.4}}>
-                    Este mês você gastou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalExpense)}</span> e 
-                    arrecadou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalIncome)}</span>.
-                    {balance < 0 && <span style={{color: 'var(--danger-color)'}}><br/>Déficit Operacional detectado.</span>}
+                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
+                    <label>Valor (R$)</label>
+                    <input type="text" value={amount} onChange={handleAmountChange} placeholder="0,00" required />
                   </div>
-                </div>
-              </div>
-            </section>
+                  
+                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
+                    <label>Tipo</label>
+                    <select value={type} onChange={(e) => { setType(e.target.value); setCategory(''); setIsRecurring(false); }}>
+                      <option value="expense">Despesa</option>
+                      <option value="income">Receita</option>
+                    </select>
+                  </div>
+                  
+                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
+                    <label>Categoria</label>
+                    <select value={category} onChange={(e) => setCategory(e.target.value)} required>
+                      <option value="" disabled>Selecione</option>
+                      {(type === 'expense' ? expenseCategories : incomeCategories).map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <button type="submit" className="submit-btn" style={{alignSelf: 'flex-start', marginTop: '18px'}}>Registrar</button>
+                </form>
+              </section>
 
-            <section className="card form-section">
-              <form onSubmit={handleAddTransaction} className="transaction-form" style={{gridTemplateColumns: '2fr 1fr 1fr 1fr auto'}}>
-                <div className="form-group">
-                  <label>Descrição</label>
-                  <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Conta de Luz" required />
-                  {type === 'expense' && (
-                     <label className="checkbox-label" style={{display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', marginTop: 4}}>
-                        <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} style={{width: 'auto', margin: 0}} />
-                        Repetir mensamente
-                     </label>
+              <section className="card list-section">
+                <div className="list-header">
+                  <h2>Registros Recentes</h2>
+                  <span className="link-all" style={{color: 'var(--text-tertiary)'}}>{filteredTransactions.length} registros</span>
+                </div>
+                
+                <div className="history-list">
+                  {filteredTransactions.length === 0 ? (
+                    <div style={{fontSize: 11, padding: '1rem', textAlign: 'center', color: 'var(--text-tertiary)'}}>
+                      Ainda não há registros lançados neste mês.
+                    </div>
+                  ) : (
+                    filteredTransactions.map(t => (
+                      <div key={t.id} className="history-item">
+                        <div className={`t-icon-box ${t.type}`}>
+                          <div className={t.type === 'expense' ? 'arrow-down' : 'arrow-up'}></div>
+                        </div>
+                        <div className="t-details">
+                          <span className="t-name">
+                             {t.description} 
+                             {t.isRecurring && <span title="Despesa Recorrente" style={{marginLeft: 4, color: 'var(--primary-color)'}}>⟳</span>}
+                          </span>
+                          <span className="t-meta">{t.category} • {t.displayDate}</span>
+                        </div>
+                        <div className={`t-amount ${t.type}`}>
+                          {t.type === 'expense' ? '− ' : '+ '}R$ {formatMoney(t.amount)}
+                        </div>
+                        <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>
+                      </div>
+                    ))
                   )}
                 </div>
-                
-                <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                  <label>Valor (R$)</label>
-                  <input type="text" value={amount} onChange={handleAmountChange} placeholder="0,00" required />
-                </div>
-                
-                <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                  <label>Tipo</label>
-                  <select value={type} onChange={(e) => { setType(e.target.value); setCategory(''); setIsRecurring(false); }}>
-                    <option value="expense">Despesa</option>
-                    <option value="income">Receita</option>
-                  </select>
-                </div>
-                
-                <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                  <label>Categoria</label>
-                  <select value={category} onChange={(e) => setCategory(e.target.value)} required>
-                    <option value="" disabled>Selecione</option>
-                    {(type === 'expense' ? expenseCategories : incomeCategories).map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <button type="submit" className="submit-btn" style={{alignSelf: 'flex-start', marginTop: '18px'}}>Registrar</button>
-              </form>
-            </section>
+              </section>
+            </main>
 
-            <section className="card list-section">
-              <div className="list-header">
-                <h2>Registros Recentes</h2>
-                <span className="link-all" style={{color: 'var(--text-tertiary)'}}>{filteredTransactions.length} registros</span>
-              </div>
-              
-              <div className="history-list">
-                {filteredTransactions.length === 0 ? (
-                  <div style={{fontSize: 11, padding: '1rem', textAlign: 'center', color: 'var(--text-tertiary)'}}>
-                    Ainda não há registros lançados neste mês.
+            {/* CHATBOT AI PANEL OVERLAY */}
+            <aside className="chatbot-panel">
+               <div className="chat-header">
+                  <div className="bot-avatar">⚡</div>
+                  <div className="bot-info">
+                     <span className="bot-name">Assistente Financeiro</span>
+                     <span className="bot-status">Online</span>
                   </div>
-                ) : (
-                  filteredTransactions.map(t => (
-                    <div key={t.id} className="history-item">
-                      <div className={`t-icon-box ${t.type}`}>
-                        <div className={t.type === 'expense' ? 'arrow-down' : 'arrow-up'}></div>
-                      </div>
-                      <div className="t-details">
-                        <span className="t-name">
-                           {t.description} 
-                           {t.isRecurring && <span title="Despesa Recorrente" style={{marginLeft: 4, color: 'var(--primary-color)'}}>⟳</span>}
-                        </span>
-                        <span className="t-meta">{t.category} • {t.displayDate}</span>
-                      </div>
-                      <div className={`t-amount ${t.type}`}>
-                        {t.type === 'expense' ? '− ' : '+ '}R$ {formatMoney(t.amount)}
-                      </div>
-                      <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </section>
-          </main>
+               </div>
+               
+               <div className="chat-messages">
+                  {chatMessages.map(msg => (
+                     <div key={msg.id} style={{display: 'flex', flexDirection: 'column'}}>
+                        <div className={`chat-bubble ${msg.sender}`}>
+                           {msg.text}
+                        </div>
+                        
+                        {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
+                        {msg.sender === 'bot' && pendingAction && chatMessages[chatMessages.length - 1].id === msg.id && msg.text.includes('Deseja registrar') && (
+                           <div className="chat-action-card">
+                              <div className="action-title">Resumo Extraído</div>
+                              <div className="action-detail">
+                                 <span>Tipo:</span> <span className="action-val" style={{color: pendingAction.type === 'expense' ? 'var(--danger-color)' : 'var(--success-color)'}}>{pendingAction.type === 'income' ? 'Receita' : 'Despesa'}</span>
+                              </div>
+                              <div className="action-detail">
+                                 <span>Valor:</span> <span className="action-val">R$ {formatMoney(pendingAction.amount)}</span>
+                              </div>
+                              <div className="action-detail">
+                                 <span>Info:</span> <span className="action-val">{pendingAction.description}</span>
+                              </div>
+                              <div className="action-detail">
+                                 <span>Categoria:</span> <span className="action-val">{pendingAction.category}</span>
+                              </div>
+                              <div className="action-buttons">
+                                 <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>
+                                 <button className="btn-cancel" onClick={handleChatCancel}>Cancelar</button>
+                              </div>
+                           </div>
+                        )}
+                     </div>
+                  ))}
+               </div>
+
+               <div className="chat-input-area">
+                  <div className="chat-suggestions">
+                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>🍟 50 ifood</div>
+                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>🚗 90 uber</div>
+                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>📊 Qual meu saldo?</div>
+                  </div>
+                  <form onSubmit={handleChatSubmit} className="chat-form">
+                     <input 
+                       type="text" 
+                       className="chat-input" 
+                       placeholder={pendingAction ? "Digite Sim ou Não..." : "Ex: 120 da academia"}
+                       value={chatInput}
+                       onChange={e => setChatInput(e.target.value)}
+                     />
+                     <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
+                        ↑
+                     </button>
+                  </form>
+               </div>
+            </aside>
+          </div>
         )}
 
         {currentView === 'analytics' && (
