@@ -631,14 +631,24 @@ h1, h2, h3, h4 { font-weight: 500; }
 
 @media (max-width: 768px) {
   .dashboard-grid { grid-template-columns: 1fr; }
-  .transaction-form { grid-template-columns: 1fr; }
+  .transaction-form { grid-template-columns: 1fr; gap: 15px; }
   
   .app-layout { flex-direction: column; }
   .sidebar { width: 100%; height: auto; border-right: none; border-bottom: 0.5px solid var(--border-color); }
   .sidebar-nav { flex-direction: row; overflow-x: auto; padding: 1rem; }
   .content-wrapper { padding: 0 1rem 1rem 1rem; }
-  .top-actions { gap: 8px; }
+  .top-bar { flex-direction: column; align-items: flex-start; gap: 10px; height: auto; padding: 1rem 0;}
+  .top-actions { gap: 8px; width: 100%; justify-content: space-between; flex-wrap: wrap;}
   .export-btn { display: none; }
+  .user-info { width: 100%; justify-content: space-between; }
+}
+
+@media (max-width: 480px) {
+  .auth-card { padding: 1.5rem 1rem; border: none; border-radius: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; }
+  .grid-card { padding: 1rem 0.5rem; }
+  .form-group input, .form-group select { font-size: 16px; /* Evita zoom automático do Safari no iOS */ }
+  .submit-btn { padding: 12px; font-size: 13px; margin-top: 10px; }
+  .chatbot-panel { height: 400px; }
 }
 
 /* ================= CHATBOT ASSISTANT ================= */
