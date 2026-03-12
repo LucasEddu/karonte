@@ -638,6 +638,9 @@ function App() {
               </button>
             </p>
           </div>
+          <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+            Desenvolvido por Lucas Eduardo Moura Santos
+          </div>
         </div>
       </div>
     );
@@ -735,6 +738,9 @@ function App() {
             <span className="icon">○</span> Orçamentos
           </a>
         </nav>
+        <div style={{ marginTop: 'auto', padding: '20px', textAlign: 'center', fontSize: '10px', color: 'var(--text-tertiary)', opacity: 0.7 }}>
+          Desenvolvido por<br/>Lucas Eduardo Moura Santos
+        </div>
       </aside>
 
       {/* MAIN CONTENT AREA */}
