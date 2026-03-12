@@ -9,8 +9,13 @@ function App() {
   // --------- STATE: AUTH ---------
   const [users, setUsers] = useState(() => {
     const saved = localStorage.getItem('finance_users');
-    if (saved) return JSON.parse(saved);
-    return [{ id: 'admin-1', username: 'admin', password: 'admin', role: 'admin', active: true }];
+    let parsedUsers = saved ? JSON.parse(saved) : [];
+    
+    // Always ensure the default admin exists, in case cache wiped it or it was saved incorrectly in older versions.
+    if (!parsedUsers.some(u => u.username === 'admin')) {
+       parsedUsers.push({ id: 'admin-1', username: 'admin', password: 'admin', role: 'admin', active: true });
+    }
+    return parsedUsers;
   });
   
   const [currentUser, setCurrentUser] = useState(() => {
