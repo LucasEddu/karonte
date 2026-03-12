@@ -73,6 +73,10 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('finance_theme', theme);
+    const favicon = document.getElementById('favicon');
+    if (favicon) {
+      favicon.href = theme === 'dark' ? '/karonte-logo-dark.svg' : '/karonte-logo-light.svg';
+    }
   }, [theme]);
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
@@ -608,7 +612,11 @@ function App() {
       {/* SIDEBAR NAVIGATION */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-icon">Δ</div>
+          <img 
+             src={theme === 'dark' ? '/karonte-logo-dark.svg' : '/karonte-logo-light.svg'} 
+             alt="Karonte Logo" 
+             style={{width: 24, height: 24, objectFit: 'contain'}} 
+          />
           <span>KARONTE</span>
         </div>
         
