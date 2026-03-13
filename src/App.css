@@ -625,6 +625,11 @@ h1, h2, h3, h4 { font-weight: 500; }
   box-shadow: 0 0 0 2px rgba(216, 90, 48, 0.2);
 }
 
+.month-select option, .year-select option {
+  background-color: #1a0c0c; /* Força fundo escuro no menu aberto */
+  color: var(--text-primary);
+}
+
 .export-btn {
   background: transparent;
   color: var(--text-secondary);

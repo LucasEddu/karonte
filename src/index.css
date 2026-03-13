@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 :root, [data-theme="dark"] {
+  color-scheme: dark;
   /* Escuro customizado a partir dos dados do chatbot escort */
   --bg-color: #0e0808;        
   --surface-color: #160c0c;   
