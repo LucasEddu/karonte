@@ -112,6 +112,8 @@ function App() {
   // --------- STATE: CHATBOT UI ---------
   const [chatOpen, setChatOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef(null);
 
 
   // --------- EFFECTS ---------
@@ -953,6 +955,56 @@ function App() {
 
        if (!chatOpen) setUnreadCount(prev => prev + 1);
     }, 600);
+  };
+
+  const handleVoiceToggle = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Seu navegador não suporta reconhecimento de voz.");
+      return;
+    }
+
+    if (isRecording) {
+      recognitionRef.current.stop();
+      setIsRecording(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+      setIsRecording(true);
+      setChatInput('');
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(result => result[0])
+        .map(result => result.transcript)
+        .join('');
+      setChatInput(transcript);
+    };
+
+    recognition.onend = () => {
+      setIsRecording(false);
+      // Se tiver algo no input, envia automaticamente
+      if (chatInput.trim()) {
+        const dummyEvent = { preventDefault: () => {} };
+        handleChatSubmit(dummyEvent);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.error("Speech Recognition Error", event.error);
+      setIsRecording(false);
+      if (event.error === 'not-allowed') alert("Permissão de microfone negada.");
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
   };
 
   useEffect(() => {
@@ -1813,6 +1865,14 @@ function App() {
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                 />
+                <button 
+                   type="button" 
+                   className={`chat-voice-btn ${isRecording ? 'recording' : ''}`}
+                   onClick={handleVoiceToggle}
+                   title="Comando de Voz"
+                >
+                  🎙️
+                </button>
                 <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
                   ↑
                 </button>
