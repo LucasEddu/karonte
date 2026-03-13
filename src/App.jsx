@@ -696,7 +696,7 @@ function App() {
             <h2>{authMode === 'login' ? 'Entrar no Karonte' : 'Criar Conta no Karonte'}</h2>
             <p>Seu sistema de controle financeiro.</p>
           </div>
-          {authError && <div className="auth-error">{authError}</div>}
+          {authError ? <div className="auth-error">{authError}</div> : null}
           <form className="auth-form" onSubmit={handleAuth}>
             {authMode === 'register' && (
                <>
@@ -729,10 +729,10 @@ function App() {
                   required
                   style={authConfirmPassword && authPassword !== authConfirmPassword ? {borderColor: 'var(--danger-color)'} : {}}
                 />
-                {authConfirmPassword && authPassword !== authConfirmPassword && (
-                  <span style={{fontSize: 10, color: 'var(--danger-color)', marginTop: 2}}>As senhas não coincidem</span>
-                )}
-              </div>
+                 {(authConfirmPassword && authPassword !== authConfirmPassword) ? (
+                   <span style={{fontSize: 10, color: 'var(--danger-color)', marginTop: 2}}>As senhas não coincidem</span>
+                 ) : null}
+               </div>
             )}
             <button type="submit" className="submit-btn full-width auth-btn">
               {authMode === 'login' ? 'Acessar' : 'Registrar'}
@@ -781,7 +781,7 @@ function App() {
         </header>
 
         {/* Admin own password change form */}
-        {adminOwnPassVisible && (
+        {adminOwnPassVisible ? (
           <div className="admin-own-pass-bar">
             <form onSubmit={handleChangeOwnPassword} className="admin-own-pass-form">
               <input
@@ -793,14 +793,14 @@ function App() {
                 autoFocus
               />
               <button type="submit" className="submit-btn">Salvar Senha</button>
-              {adminOwnPassMsg && (
+              {adminOwnPassMsg ? (
                 <span className={`admin-msg ${adminOwnPassMsg.includes('sucesso') ? 'admin-msg--ok' : 'admin-msg--err'}`}>
                   {adminOwnPassMsg}
                 </span>
-              )}
+              ) : null}
             </form>
           </div>
-        )}
+        ) : null}
 
         <main className="main-content padding-container">
 
@@ -984,9 +984,9 @@ function App() {
                   <option value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</option>
                </select>
             </div>
-            {filteredTransactions.length > 0 && (
+            {filteredTransactions.length > 0 ? (
                <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Descarga</button>
-            )}
+            ) : null}
             <div className="divider"></div>
             <button onClick={toggleTheme} className="text-btn" style={{marginRight: 10, fontSize: '14px', alignSelf: 'center'}} title="Mudar Tema">
                {theme === 'dark' ? '☀️' : '🌙'}
@@ -1033,7 +1033,7 @@ function App() {
                             <div className="cat-header">
                               <span className="cat-name">{item.name}</span>
                               <div>
-                                {budgetInfo.isOver80 && <span className="badge-alert">{visualPct.toFixed(0)}% Util</span>}
+                                {budgetInfo.isOver80 ? <span className="badge-alert">{visualPct.toFixed(0)}% Util</span> : null}
                                 <span className="cat-value" style={{color: fillCol}}>R$ {formatMoney(item.total)}</span>
                               </div>
                             </div>
@@ -1063,9 +1063,8 @@ function App() {
                     </div>
                     
                     <div style={{fontSize: 10, color: 'var(--text-tertiary)', padding: '5px', lineHeight: 1.4}}>
-                      Este mês você gastou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalExpense)}</span> e 
-                      arrecadou <span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalIncome)}</span>.
-                      {balance < 0 && <span style={{color: 'var(--danger-color)'}}><br/>Déficit Operacional detectado.</span>}
+                      <span>Este mês você gastou </span><span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalExpense)}</span><span> e arrecadou </span><span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalIncome)}</span><span>.</span>
+                      {balance < 0 ? <span style={{color: 'var(--danger-color)'}}><br/>Déficit Operacional detectado.</span> : null}
                     </div>
                   </div>
                 </div>
@@ -1104,30 +1103,30 @@ function App() {
                   <button type="submit" className="submit-btn" style={{alignSelf: 'flex-end'}}>Registrar</button>
 
                   {/* Repetir mensalmente — abaixo da linha principal, visível apenas para Despesas */}
-                  {type === 'expense' && (
+                  {type === 'expense' ? (
                     <div className="recurring-row">
                       <label className="checkbox-label">
                         <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
-                        Repetir mensalmente
+                        <span>Repetir mensalmente</span>
                       </label>
                     </div>
-                  )}
+                  ) : null}
                 </form>
 
                 <div className="cat-manager-toggle" onClick={() => setShowCatManager(!showCatManager)}>
                   <span>{showCatManager ? '▾' : '▸'} Gerenciar minhas categorias personalizadas</span>
                 </div>
 
-                {showCatManager && (
+                {showCatManager ? (
                   <div className="cat-manager-content">
                     <div className="cat-list-wrapper">
                       <div>
                         <h4>Despesas</h4>
                         <div className="cat-chips">
-                          {customCategories.expense.length === 0 && <span className="no-cats">Nenhuma personalizada</span>}
+                          {customCategories.expense.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
                           {customCategories.expense.map(cat => (
                             <span key={cat} className="cat-chip">
-                              {cat} <button onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
+                              <span>{cat}</span> <button onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
                             </span>
                           ))}
                         </div>
@@ -1135,10 +1134,10 @@ function App() {
                       <div style={{marginTop: 15}}>
                         <h4>Receitas</h4>
                         <div className="cat-chips">
-                          {customCategories.income.length === 0 && <span className="no-cats">Nenhuma personalizada</span>}
+                          {customCategories.income.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
                           {customCategories.income.map(cat => (
                             <span key={cat} className="cat-chip">
-                              {cat} <button onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
+                              <span>{cat}</span> <button onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
                             </span>
                           ))}
                         </div>
@@ -1162,7 +1161,7 @@ function App() {
                       </button>
                     </div>
                   </div>
-                )}
+                ) : null}
               </section>
 
               <section className="card list-section">
@@ -1174,7 +1173,7 @@ function App() {
                 <div className="history-list">
                   {filteredTransactions.length === 0 ? (
                     <div style={{fontSize: 11, padding: '1rem', textAlign: 'center', color: 'var(--text-tertiary)'}}>
-                      Ainda não há registros lançados neste mês.
+                      <span>Ainda não há registros lançados neste mês.</span>
                     </div>
                   ) : (
                     filteredTransactions.map(t => (
@@ -1184,13 +1183,13 @@ function App() {
                         </div>
                         <div className="t-details">
                           <span className="t-name">
-                             {t.description} 
-                             {t.isRecurring && <span title="Despesa Recorrente" style={{marginLeft: 4, color: 'var(--primary-color)'}}>⟳</span>}
+                             <span>{t.description}</span>
+                             {t.isRecurring ? <span title="Despesa Recorrente" style={{marginLeft: 4, color: 'var(--primary-color)'}}>⟳</span> : null}
                           </span>
-                          <span className="t-meta">{t.category} • {t.displayDate}</span>
+                          <span className="t-meta"><span>{t.category}</span><span> • </span><span>{t.displayDate}</span></span>
                         </div>
                         <div className={`t-amount ${t.type}`}>
-                          {t.type === 'expense' ? '− ' : '+ '}R$ {formatMoney(t.amount)}
+                          <span>{t.type === 'expense' ? '− ' : '+ '}</span><span>R$ {formatMoney(t.amount)}</span>
                         </div>
                         <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>
                       </div>
@@ -1218,7 +1217,7 @@ function App() {
                         </div>
                         
                         {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
-                        {msg.sender === 'bot' && pendingAction && chatMessages[chatMessages.length - 1].id === msg.id && msg.text.includes('Deseja registrar') && (
+                         {(msg.sender === 'bot' && pendingAction && chatMessages[chatMessages.length - 1].id === msg.id && msg.text.includes('Deseja registrar')) ? (
                            <div className="chat-action-card">
                               <div className="action-title">Resumo Extraído</div>
                               <div className="action-detail">
@@ -1238,7 +1237,7 @@ function App() {
                                  <button className="btn-cancel" onClick={handleChatCancel}>Cancelar</button>
                               </div>
                            </div>
-                        )}
+                        ) : null}
                      </div>
                   ))}
                </div>
@@ -1375,7 +1374,7 @@ function App() {
              </div>
 
              {/* ROW 3: Horizontal BarChart de categorias */}
-             {categoryStats.length > 0 && (
+             {categoryStats.length > 0 ? (
                <div className="card grid-card" style={{height: Math.max(180, categoryStats.length * 46 + 60)}}>
                  <div className="card-title">Gasto por Categoria — detalhe</div>
                  <ResponsiveContainer width="100%" height="88%">
@@ -1400,7 +1399,7 @@ function App() {
                    </BarChart>
                  </ResponsiveContainer>
                </div>
-             )}
+             ) : null}
 
            </main>
         )}
@@ -1431,13 +1430,13 @@ function App() {
                              {hasBudget ? `Gasto: R$ ${formatMoney(catSpent)} de R$ ${formatMoney(info.limit)}` : 'Sem Limite (Clique para definir)'}
                           </span>
                         </div>
-                        {hasBudget && (
-                           <div style={{width: 100, marginRight: 15}}>
-                             <div className="progress-bg" style={{backgroundColor: trackCol}}>
-                               <div className="progress-fill" style={{width: `${info.pct}%`, backgroundColor: fillCol}}></div>
-                             </div>
-                           </div>
-                        )}
+                         {hasBudget ? (
+                            <div style={{width: 100, marginRight: 15}}>
+                              <div className="progress-bg" style={{backgroundColor: trackCol}}>
+                                <div className="progress-fill" style={{width: `${info.pct}%`, backgroundColor: fillCol}}></div>
+                              </div>
+                            </div>
+                         ) : null}
                         <div className="t-amount" style={{color: info.isOver80 ? 'var(--danger-color)' : 'var(--text-tertiary)'}}>
                            {hasBudget ? `${info.pct.toFixed(0)}%` : '—'}
                         </div>
