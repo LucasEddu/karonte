@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend
+  PieChart, Pie, Cell, Legend,
+  BarChart, Bar,
+  AreaChart, Area
 } from 'recharts';
 import './App.css';
 import { auth } from './config/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword } from './services/authService';
+import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
+import { getUserCategories, saveUserCategories } from './services/categoriesService';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -51,6 +54,12 @@ function App() {
 
   // --------- STATE: AUTH ---------
   const [users, setUsers] = useState([]); // Will be populated for admins
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [resetSentId, setResetSentId] = useState(null); // uid com feedback inline
+  const [adminOwnPassInput, setAdminOwnPassInput] = useState('');
+  const [adminOwnPassVisible, setAdminOwnPassVisible] = useState(false);
+  const [adminOwnPassMsg, setAdminOwnPassMsg] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -59,6 +68,7 @@ function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [authConfirmPassword, setAuthConfirmPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
   // --------- STATE: TRANSACTIONS & FORM ---------
@@ -71,18 +81,29 @@ function App() {
   const [category, setCategory] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
 
+  // --------- STATE: CUSTOM CATEGORIES ---------
+  const [customCategories, setCustomCategories] = useState({ expense: [], income: [] });
+  const [showCatManager, setShowCatManager] = useState(false);
+  const [newCatName, setNewCatName]  = useState('');
+  const [newCatType, setNewCatType]  = useState('expense');
+  const [catSaving, setCatSaving]    = useState(false);
+
+  const DEFAULT_EXPENSE_CATS = ['Moradia', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Outros'];
+  const DEFAULT_INCOME_CATS  = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
+
+  // Merged lists — defaults + custom (no duplicates)
+  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...customCategories.expense])];
+  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...customCategories.income])];
+
+  const COLORS = ['#1D9E75', '#5DCAA5', '#f87171', '#f59e0b', '#8b5cf6', '#3b82f6'];
+
   // --------- STATE: BUDGETS & GOALS ---------
   const [budgets, setBudgets] = useState({});
 
   // --------- STATE: UI NAVIGATION & FILTERS ---------
   const [currentView, setCurrentView] = useState('dashboard');
-  
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-  const expenseCategories = ['Moradia', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Outros'];
-  const incomeCategories = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
-  const COLORS = ['#1D9E75', '#5DCAA5', '#f87171', '#f59e0b', '#8b5cf6', '#3b82f6'];
 
   // --------- EFFECTS ---------
   useEffect(() => {
@@ -119,6 +140,7 @@ function App() {
         setAuthLoading(false);
         setTransactions([]);
         setBudgets({});
+        setCustomCategories({ expense: [], income: [] });
       }
     });
 
@@ -136,6 +158,10 @@ function App() {
          
          const userBudgets = await getUserBudgets(currentUser.uid);
          setBudgets(userBudgets);
+
+         // Load custom categories
+         const cats = await getUserCategories(currentUser.uid);
+         setCustomCategories(cats);
          
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
@@ -217,14 +243,19 @@ function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
+
+    if (authMode === 'register' && authPassword !== authConfirmPassword) {
+      setAuthError('As senhas não coincidem. Verifique e tente novamente.');
+      return;
+    }
+
     try {
       if (authMode === 'login') {
-         // Firebase login ALWAYS requires the email.
          await login(authEmail, authPassword);
       } else {
          await register(authEmail, authPassword, authFullName);
       }
-      setAuthUsername(''); setAuthEmail(''); setAuthPassword(''); setAuthFullName('');
+      setAuthUsername(''); setAuthEmail(''); setAuthPassword(''); setAuthFullName(''); setAuthConfirmPassword('');
     } catch (error) {
        console.error(error.message);
        if (error.code === 'auth/invalid-credential') setAuthError('Credenciais inválidas.');
@@ -240,34 +271,49 @@ function App() {
 
   // --------- ADMIN PANEL LOGIC ---------
   const handleToggleUserStatus = async (id, currentStatus) => {
-    if (id === currentUser.uid) return alert('Você não pode bloquear a si mesmo.');
+    if (id === currentUser.uid) return;
     try {
       await toggleUserStatus(id, currentStatus);
       setUsers(users.map(u => u.id === id ? { ...u, active: !u.active } : u));
-    } catch(err) { alert('Erro ao alterar status'); }
+    } catch(err) { console.error('Erro ao alterar status', err); }
   };
 
-  const handleEditUsername = async (id, currentUsername) => {
-    const newName = prompt(`Novo nome de usuário (atual: ${currentUsername}):`, currentUsername);
-    if (!newName || newName === currentUsername) return;
+  const handleStartEditUsername = (u) => {
+    setEditingUserId(u.id);
+    setEditingValue(u.username);
+    setResetSentId(null);
+  };
+
+  const handleSaveUsername = async (id) => {
+    const trimmed = editingValue.trim();
+    if (!trimmed) { setEditingUserId(null); return; }
     try {
-      await updateUsername(id, newName);
-      setUsers(users.map(u => u.id === id ? { ...u, username: newName } : u));
-      if (currentUser.uid === id) setCurrentUser({...currentUser, username: newName});
-    } catch (err) { alert('Erro ao atualizar nome'); }
+      await updateUsername(id, trimmed);
+      setUsers(users.map(u => u.id === id ? { ...u, username: trimmed } : u));
+      if (currentUser.uid === id) setCurrentUser({...currentUser, username: trimmed});
+    } catch (err) { console.error('Erro ao atualizar nome', err); }
+    setEditingUserId(null);
   };
 
-  const handleResetPassword = (id, username) => {
-    alert('Na versão Firebase, senhas de outros usuários devem ser redefinidas via email de recuperação ou fluxo do Admin SDK (Backend).');
-  };
-
-  const handleChangeOwnPassword = async () => {
-    const newPass = prompt('Sua nova senha de administrador:');
-    if (!newPass) return;
+  const handleSendPasswordReset = async (uid, email) => {
     try {
-      await changeOwnPassword(auth.currentUser, newPass);
-      alert('Sua senha foi alterada com sucesso.');
-    } catch (err) { alert('Erro ao mudar senha. Tente relogar.'); }
+      await sendPasswordReset(email);
+      setResetSentId(uid);
+      setTimeout(() => setResetSentId(prev => prev === uid ? null : prev), 4000);
+    } catch(err) { console.error('Erro ao enviar reset', err); }
+  };
+
+  const handleChangeOwnPassword = async (e) => {
+    e.preventDefault();
+    if (!adminOwnPassInput.trim()) return;
+    try {
+      await changeOwnPassword(auth.currentUser, adminOwnPassInput);
+      setAdminOwnPassMsg('Senha alterada com sucesso!');
+      setAdminOwnPassInput('');
+      setTimeout(() => { setAdminOwnPassMsg(''); setAdminOwnPassVisible(false); }, 3000);
+    } catch (err) {
+      setAdminOwnPassMsg('Erro ao mudar senha. Tente relogar.');
+    }
   };
 
   // --------- TRANSACTION FORM MASK & LOGIC ---------
@@ -437,6 +483,44 @@ function App() {
     } catch(err) { alert('Erro ao salvar orçamento.')}
   };
 
+  // --------- CUSTOM CATEGORIES HANDLERS ---------
+  const handleAddCustomCategory = async () => {
+    const name = newCatName.trim();
+    if (!name || !currentUser) return;
+    const allForType = newCatType === 'expense' ? expenseCategories : incomeCategories;
+    if (allForType.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
+      alert('Esta categoria já existe.');
+      return;
+    }
+    const updated = { expense: [...customCategories.expense], income: [...customCategories.income] };
+    updated[newCatType].push(name.charAt(0).toUpperCase() + name.slice(1));
+    setCatSaving(true);
+    try {
+      await saveUserCategories(currentUser.uid, updated);
+      setCustomCategories(updated);
+      setNewCatName('');
+    } catch (err) {
+      alert('Erro ao salvar categoria.');
+    } finally {
+      setCatSaving(false);
+    }
+  };
+
+  const handleRemoveCustomCategory = async (catName, catType) => {
+    if (!currentUser) return;
+    const updated = {
+      expense: customCategories.expense.filter(c => c !== catName),
+      income:  customCategories.income.filter(c  => c !== catName),
+    };
+    if (category === catName) setCategory('');
+    try {
+      await saveUserCategories(currentUser.uid, updated);
+      setCustomCategories(updated);
+    } catch(err) {
+      alert('Erro ao remover categoria.');
+    }
+  };
+
   // --------- CHATBOT ---------
   const [chatMessages, setChatMessages] = useState([
     { id: 'welcome', sender: 'bot', text: 'Olá! Sou seu assistente. Me mande algo como "cinema 50" ou me pergunte "qual meu saldo?".' }
@@ -474,22 +558,30 @@ function App() {
     // 3. Inference rules
     const incomeKeywords = ['salário', 'salario', 'freelance', 'receita', 'renda', 'bônus', 'bonus', 'pagamento'];
     let inferType = 'expense';
-    
-    // Check type
-    if (incomeKeywords.some(kw => normalized.includes(kw))) {
-       inferType = 'income';
+    if (incomeKeywords.some(kw => normalized.includes(kw))) inferType = 'income';
+
+    // Check custom income categories first (exact lowercase name match)
+    if (inferType === 'expense') {
+      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase()));
+      if (matchCustomIncome) inferType = 'income';
     }
 
     // Check category mapping
     let inferCategory = 'Outros';
     if (inferType === 'expense') {
-       if (/(academia|cinema|bar|lazer|balada|jogo)/.test(normalized)) inferCategory = 'Lazer';
+       // Check custom expense categories first
+       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase()));
+       if (matchCustom) inferCategory = matchCustom;
+       else if (/(academia|cinema|bar|lazer|balada|jogo)/.test(normalized)) inferCategory = 'Lazer';
        else if (/(mercado|supermercado|restaurante|pizza|ifood|lanche|comida|padaria)/.test(normalized)) inferCategory = 'Alimentação';
        else if (/(aluguel|reforma|condomínio|condominio|luz|água|agua|conta)/.test(normalized)) inferCategory = 'Moradia';
        else if (/(farmácia|farmacia|médico|medico|consulta|remédio|remedio)/.test(normalized)) inferCategory = 'Saúde';
        else if (/(transporte|uber|99|gasolina|combustível|onibus|ônibus|metro|metrô)/.test(normalized)) inferCategory = 'Transporte';
     } else {
-       if (/(salário|salario)/.test(normalized)) inferCategory = 'Salário';
+       // Check custom income categories
+       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase()));
+       if (matchCustom) inferCategory = matchCustom;
+       else if (/(salário|salario)/.test(normalized)) inferCategory = 'Salário';
        else if (/(freelance)/.test(normalized)) inferCategory = 'Freelance';
     }
 
@@ -626,6 +718,22 @@ function App() {
               <label>Senha</label>
               <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required />
             </div>
+            {authMode === 'register' && (
+              <div className="form-group">
+                <label>Confirmar Senha</label>
+                <input
+                  type="password"
+                  value={authConfirmPassword}
+                  onChange={e => setAuthConfirmPassword(e.target.value)}
+                  placeholder="Repita a senha acima"
+                  required
+                  style={authConfirmPassword && authPassword !== authConfirmPassword ? {borderColor: 'var(--danger-color)'} : {}}
+                />
+                {authConfirmPassword && authPassword !== authConfirmPassword && (
+                  <span style={{fontSize: 10, color: 'var(--danger-color)', marginTop: 2}}>As senhas não coincidem</span>
+                )}
+              </div>
+            )}
             <button type="submit" className="submit-btn full-width auth-btn">
               {authMode === 'login' ? 'Acessar' : 'Registrar'}
             </button>
@@ -647,65 +755,175 @@ function App() {
   }
 
   if (currentUser.role === 'admin') {
+    const totalUsers = users.length;
+    const activeUsers = users.filter(u => u.active).length;
+    const blockedUsers = totalUsers - activeUsers;
+
     return (
       <div className="admin-layout">
-         <header className="top-bar admin-bar">
+        <header className="top-bar admin-bar">
           <div className="user-info">
-            <div className="avatar">A</div>
+            <div className="avatar" style={{background: 'var(--primary-bg)', color: 'var(--primary-color)', fontWeight: 700}}>A</div>
             <div className="user-details">
               <h3>Painel Admin</h3>
-              <span>Gestão de Sistema</span>
+              <span>Gestão de Acessos — Karonte</span>
             </div>
           </div>
           <div className="top-actions">
-            <button onClick={toggleTheme} className="text-btn" style={{marginRight: 15, fontSize: '14px', alignSelf: 'center'}} title="Mudar Tema">
+            <button onClick={toggleTheme} className="text-btn" style={{fontSize: '14px'}} title="Mudar Tema">
                {theme === 'dark' ? '☀️' : '🌙'}
             </button>
-            <button onClick={handleChangeOwnPassword} className="text-btn" style={{marginRight: 15, color: 'var(--text-secondary)'}}>Alterar Senha Admin</button>
+            <button onClick={() => { setAdminOwnPassVisible(v => !v); setAdminOwnPassMsg(''); }} className="logout-btn">
+              {adminOwnPassVisible ? 'Cancelar' : 'Alterar Minha Senha'}
+            </button>
             <button onClick={handleLogout} className="logout-btn">Sair</button>
           </div>
         </header>
 
+        {/* Admin own password change form */}
+        {adminOwnPassVisible && (
+          <div className="admin-own-pass-bar">
+            <form onSubmit={handleChangeOwnPassword} className="admin-own-pass-form">
+              <input
+                type="password"
+                placeholder="Nova senha de administrador"
+                value={adminOwnPassInput}
+                onChange={e => setAdminOwnPassInput(e.target.value)}
+                className="admin-inline-input"
+                autoFocus
+              />
+              <button type="submit" className="submit-btn">Salvar Senha</button>
+              {adminOwnPassMsg && (
+                <span className={`admin-msg ${adminOwnPassMsg.includes('sucesso') ? 'admin-msg--ok' : 'admin-msg--err'}`}>
+                  {adminOwnPassMsg}
+                </span>
+              )}
+            </form>
+          </div>
+        )}
+
         <main className="main-content padding-container">
+
+          {/* Summary cards */}
+          <div className="admin-stats-row">
+            <div className="admin-stat-card">
+              <span className="admin-stat-label">Total de Usuários</span>
+              <span className="admin-stat-value">{totalUsers}</span>
+            </div>
+            <div className="admin-stat-card admin-stat-card--ok">
+              <span className="admin-stat-label">Ativos</span>
+              <span className="admin-stat-value" style={{color: 'var(--success-color)'}}>{activeUsers}</span>
+            </div>
+            <div className="admin-stat-card admin-stat-card--err">
+              <span className="admin-stat-label">Bloqueados</span>
+              <span className="admin-stat-value" style={{color: 'var(--danger-color)'}}>{blockedUsers}</span>
+            </div>
+          </div>
+
+          {/* Users table */}
           <div className="card list-section">
-              <div className="list-header">
-                <h2>Gerenciar Usuários</h2>
-              </div>
-              <div className="table-responsive">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Usuário</th>
-                      <th>Role</th>
-                      <th>Status</th>
-                      <th style={{textAlign: 'right'}}>Ações</th>
+            <div className="list-header">
+              <h2>Usuários Registrados</h2>
+            </div>
+            <div className="table-responsive">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Nome Completo</th>
+                    <th>Email</th>
+                    <th>Usuário</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th style={{textAlign: 'right'}}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => (
+                    <tr key={u.id} className={editingUserId === u.id ? 'admin-row--editing' : ''}>
+                      {/* Nome Completo */}
+                      <td>{u.fullName || '—'}</td>
+
+                      {/* Email */}
+                      <td style={{color: 'var(--text-secondary)', fontSize: 10}}>{u.email}</td>
+
+                      {/* Usuário (inline edit) */}
+                      <td>
+                        {editingUserId === u.id ? (
+                          <div style={{display: 'flex', gap: 6, alignItems: 'center'}}>
+                            <input
+                              className="admin-inline-input"
+                              value={editingValue}
+                              onChange={e => setEditingValue(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleSaveUsername(u.id); if (e.key === 'Escape') setEditingUserId(null); }}
+                              autoFocus
+                            />
+                            <button className="admin-action-btn admin-action-btn--ok" onClick={() => handleSaveUsername(u.id)}>✓</button>
+                            <button className="admin-action-btn" onClick={() => setEditingUserId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <span>
+                            {u.username}
+                            {u.id === currentUser.uid && <span className="admin-you-badge">você</span>}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Role */}
+                      <td>
+                        <span className={`admin-role-badge ${u.role === 'admin' ? 'admin-role-badge--admin' : 'admin-role-badge--user'}`}>
+                          {u.role === 'admin' ? 'Admin' : 'Usuário'}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td>
+                        <span style={{color: u.active ? 'var(--success-color)' : 'var(--danger-color)', fontSize: 11}}>
+                          {u.active ? '● Ativo' : '● Bloqueado'}
+                        </span>
+                      </td>
+
+                      {/* Ações */}
+                      <td style={{textAlign: 'right'}}>
+                        <div style={{display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap'}}>
+                          {/* Editar usuário */}
+                          {editingUserId !== u.id && (
+                            <button className="admin-action-btn" onClick={() => handleStartEditUsername(u)} title="Editar nome de usuário">
+                              ✏️ Editar
+                            </button>
+                          )}
+
+                          {/* Reset senha */}
+                          {u.id !== currentUser.uid && (
+                            resetSentId === u.id ? (
+                              <span className="admin-msg admin-msg--ok">✉ Email enviado!</span>
+                            ) : (
+                              <button
+                                className="admin-action-btn"
+                                onClick={() => handleSendPasswordReset(u.id, u.email)}
+                                title={`Enviar reset de senha para ${u.email}`}
+                              >
+                                🔑 Alterar Senha
+                              </button>
+                            )
+                          )}
+
+                          {/* Bloquear / Ativar */}
+                          {u.id !== currentUser.uid && (
+                            <button
+                              className="admin-action-btn"
+                              style={{color: u.active ? 'var(--danger-color)' : 'var(--success-color)'}}
+                              onClick={() => handleToggleUserStatus(u.id, u.active)}
+                            >
+                              {u.active ? '🚫 Bloquear' : '✅ Ativar'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {users.map(u => (
-                      <tr key={u.id}>
-                        <td>
-                          {u.username}
-                          {u.id === currentUser.uid && <span style={{marginLeft: 8, fontSize: 10, color: 'var(--text-tertiary)'}}>(Você)</span>}
-                        </td>
-                        <td>{u.role === 'admin' ? 'Administrador' : 'Usuário'}</td>
-                        <td style={{color: u.active ? 'var(--success-color)' : 'var(--danger-color)'}}>
-                           {u.active ? 'Ativo' : 'Bloqueado'}
-                        </td>
-                        <td style={{textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end'}}>
-                           <button className="text-btn" onClick={() => handleEditUsername(u.id, u.username)} title="Alterar Login">Editar Nome</button>
-                           <button className="text-btn" onClick={() => handleResetPassword(u.id, u.username)} title="Alterar Senha">Resetar Senha</button>
-                           {u.id !== currentUser.uid && (
-                             <button className="text-btn" onClick={() => handleToggleUserStatus(u.id)} style={{color: u.active ? 'var(--danger-color)' : 'var(--success-color)'}}>
-                                {u.active ? 'Inativar' : 'Ativar'}
-                             </button>
-                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </main>
       </div>
@@ -858,19 +1076,13 @@ function App() {
                   <div className="form-group">
                     <label>Descrição</label>
                     <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Conta de Luz" required />
-                    {type === 'expense' && (
-                       <label className="checkbox-label" style={{display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', marginTop: 4}}>
-                          <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} style={{width: 'auto', margin: 0}} />
-                          Repetir mensamente
-                       </label>
-                    )}
                   </div>
-                  
+
                   <div className="form-group" style={{justifyContent: 'flex-start'}}>
                     <label>Valor (R$)</label>
                     <input type="text" value={amount} onChange={handleAmountChange} placeholder="0,00" required />
                   </div>
-                  
+
                   <div className="form-group" style={{justifyContent: 'flex-start'}}>
                     <label>Tipo</label>
                     <select value={type} onChange={(e) => { setType(e.target.value); setCategory(''); setIsRecurring(false); }}>
@@ -878,7 +1090,7 @@ function App() {
                       <option value="income">Receita</option>
                     </select>
                   </div>
-                  
+
                   <div className="form-group" style={{justifyContent: 'flex-start'}}>
                     <label>Categoria</label>
                     <select value={category} onChange={(e) => setCategory(e.target.value)} required>
@@ -888,9 +1100,69 @@ function App() {
                       ))}
                     </select>
                   </div>
-                  
-                  <button type="submit" className="submit-btn" style={{alignSelf: 'flex-start', marginTop: '18px'}}>Registrar</button>
+
+                  <button type="submit" className="submit-btn" style={{alignSelf: 'flex-end'}}>Registrar</button>
+
+                  {/* Repetir mensalmente — abaixo da linha principal, visível apenas para Despesas */}
+                  {type === 'expense' && (
+                    <div className="recurring-row">
+                      <label className="checkbox-label">
+                        <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
+                        Repetir mensalmente
+                      </label>
+                    </div>
+                  )}
                 </form>
+
+                <div className="cat-manager-toggle" onClick={() => setShowCatManager(!showCatManager)}>
+                  <span>{showCatManager ? '▾' : '▸'} Gerenciar minhas categorias personalizadas</span>
+                </div>
+
+                {showCatManager && (
+                  <div className="cat-manager-content">
+                    <div className="cat-list-wrapper">
+                      <div>
+                        <h4>Despesas</h4>
+                        <div className="cat-chips">
+                          {customCategories.expense.length === 0 && <span className="no-cats">Nenhuma personalizada</span>}
+                          {customCategories.expense.map(cat => (
+                            <span key={cat} className="cat-chip">
+                              {cat} <button onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{marginTop: 15}}>
+                        <h4>Receitas</h4>
+                        <div className="cat-chips">
+                          {customCategories.income.length === 0 && <span className="no-cats">Nenhuma personalizada</span>}
+                          {customCategories.income.map(cat => (
+                            <span key={cat} className="cat-chip">
+                              {cat} <button onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="cat-add-form">
+                      <input 
+                        type="text" 
+                        placeholder="Nome da categoria..." 
+                        value={newCatName} 
+                        onChange={e => setNewCatName(e.target.value)}
+                        onKeyPress={e => e.key === 'Enter' && handleAddCustomCategory()}
+                      />
+                      <select value={newCatType} onChange={e => setNewCatType(e.target.value)}>
+                        <option value="expense">Despesa</option>
+                        <option value="income">Receita</option>
+                      </select>
+                      <button onClick={handleAddCustomCategory} disabled={catSaving || !newCatName.trim()}>
+                        {catSaving ? '...' : '+'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="card list-section">
@@ -996,41 +1268,140 @@ function App() {
 
         {currentView === 'analytics' && (
            <main className="main-content">
-              <div className="card grid-card" style={{height: '350px', marginBottom: '10px'}}>
-                 <div className="card-title">Evolução do Saldo Liquido (6 meses)</div>
-                 <ResponsiveContainer width="100%" height="90%">
-                    <LineChart data={monthlyEvolutionData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} />
-                      <YAxis stroke="var(--text-tertiary)" fontSize={10} tickFormatter={(val) => `R$${val/1000}k`} tickLine={false} axisLine={false} />
-                      <RechartsTooltip contentStyle={{backgroundColor: 'var(--surface-color)', borderColor: 'var(--border-color)', borderRadius: '8px', fontSize: '11px', color: 'var(--text-primary)'}} itemStyle={{color: 'var(--text-primary)'}} labelStyle={{color: 'var(--text-secondary)'}} />
-                      <Legend iconType="circle" wrapperStyle={{fontSize: '11px', color: 'var(--text-secondary)'}} />
-                      <Line type="monotone" dataKey="Saldo" stroke="var(--primary-color)" strokeWidth={2} dot={{fill: 'var(--primary-color)', r: 4}} activeDot={{r: 6}} />
-                      <Line type="monotone" dataKey="Receitas" stroke="var(--success-color)" strokeWidth={1} strokeDasharray="5 5" dot={false} />
-                      <Line type="monotone" dataKey="Despesas" stroke="var(--danger-color)" strokeWidth={1} strokeDasharray="5 5" dot={false} />
-                    </LineChart>
-                 </ResponsiveContainer>
-              </div>
 
-              <div className="dashboard-grid">
-                 <div className="card grid-card" style={{height: '250px'}}>
-                   <div className="card-title">Composição do Gasto</div>
-                   {categoryStats.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="90%">
-                        <PieChart>
-                          <Pie data={categoryStats} innerRadius={50} outerRadius={70} paddingAngle={5} dataKey="total">
-                            {categoryStats.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={getCatFill(index, entry.name)} stroke="rgba(0,0,0,0)" />
-                            ))}
-                          </Pie>
-                          <RechartsTooltip formatter={(val) => `R$ ${formatMoney(val)}`} contentStyle={{backgroundColor: 'var(--surface-color)', borderColor: 'var(--border-color)', borderRadius: '8px', fontSize: '11px', color: 'var(--text-primary)'}} itemStyle={{color: 'var(--text-primary)'}} labelStyle={{color: 'var(--text-secondary)'}} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                   ) : (
-                      <div style={{fontSize: 11, color: 'var(--text-tertiary)', marginTop: '2rem'}}>Sem dados.</div>
-                   )}
-                 </div>
-              </div>
+             {/* ROW 1: Area chart — evolução do saldo */}
+             <div className="card grid-card" style={{height: 320, marginBottom: 10}}>
+               <div className="card-title">Evolução do Saldo Líquido — últimos 6 meses</div>
+               <ResponsiveContainer width="100%" height="88%">
+                 <AreaChart data={monthlyEvolutionData} margin={{top: 24, right: 16, left: 0, bottom: 0}}>
+                   <defs>
+                     <linearGradient id="gradSaldo" x1="0" y1="0" x2="0" y2="1">
+                       <stop offset="5%" stopColor="#D85A30" stopOpacity={0.35}/>
+                       <stop offset="95%" stopColor="#D85A30" stopOpacity={0}/>
+                     </linearGradient>
+                   </defs>
+                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" vertical={false} />
+                   <XAxis dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} />
+                   <YAxis stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} width={52}/>
+                   <RechartsTooltip
+                     contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
+                     itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
+                     formatter={v => `R$ ${formatMoney(v)}`}
+                   />
+                   <Legend iconType="circle" wrapperStyle={{fontSize:10, paddingTop:4}} />
+                   <Area
+                     type="monotone" dataKey="Saldo" stroke="#D85A30" strokeWidth={2.5}
+                     fill="url(#gradSaldo)" dot={{fill:'#D85A30', r:3}} activeDot={{r:6}}
+                     label={({x, y, value}) => value !== 0 ? (
+                       <text x={x} y={y - 8} fill="#D85A30" fontSize={9} textAnchor="middle">
+                         {`R$${(value/1000).toFixed(1)}k`}
+                       </text>
+                     ) : null}
+                   />
+                   <Area type="monotone" dataKey="Receitas" stroke="#1FBE8E" strokeWidth={1.5} fill="none" dot={{fill:'#1FBE8E', r:2}} strokeDasharray="6 3"
+                     label={({x, y, value}) => value !== 0 ? (
+                       <text x={x} y={y - 7} fill="#1FBE8E" fontSize={8} textAnchor="middle" opacity={0.8}>
+                         {`R$${(value/1000).toFixed(1)}k`}
+                       </text>
+                     ) : null}
+                   />
+                   <Area type="monotone" dataKey="Despesas" stroke="#E84B4B" strokeWidth={1.5} fill="none" dot={{fill:'#E84B4B', r:2}} strokeDasharray="6 3"
+                     label={({x, y, value}) => value !== 0 ? (
+                       <text x={x} y={y - 7} fill="#E84B4B" fontSize={8} textAnchor="middle" opacity={0.8}>
+                         {`R$${(value/1000).toFixed(1)}k`}
+                       </text>
+                     ) : null}
+                   />
+                 </AreaChart>
+               </ResponsiveContainer>
+             </div>
+
+             {/* ROW 2: BarChart receitas x despesas  +  Donut de categorias */}
+             <div className="analytics-two-col" style={{marginBottom:10}}>
+
+               {/* BarChart */}
+               <div className="card grid-card" style={{height:300}}>
+                 <div className="card-title">Receitas vs Despesas por Mês</div>
+                 <ResponsiveContainer width="100%" height="88%">
+                   <BarChart data={monthlyEvolutionData} barCategoryGap="30%" margin={{top:20,right:16,left:0,bottom:0}}>
+                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" vertical={false} />
+                     <XAxis dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} />
+                     <YAxis stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} width={52}/>
+                     <RechartsTooltip
+                       contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
+                       itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
+                       formatter={v => `R$ ${formatMoney(v)}`}
+                     />
+                     <Legend iconType="circle" wrapperStyle={{fontSize:10}} />
+                     <Bar dataKey="Receitas" fill="#1FBE8E" radius={[4,4,0,0]} maxBarSize={32}
+                       label={{position:'top', fontSize:9, fill:'#1FBE8E', formatter: v => v > 0 ? `R$${(v/1000).toFixed(1)}k` : ''}}
+                     />
+                     <Bar dataKey="Despesas" fill="#E84B4B" radius={[4,4,0,0]} maxBarSize={32}
+                       label={{position:'top', fontSize:9, fill:'#E84B4B', formatter: v => v > 0 ? `R$${(v/1000).toFixed(1)}k` : ''}}
+                     />
+                   </BarChart>
+                 </ResponsiveContainer>
+               </div>
+
+               {/* Donut */}
+               <div className="card grid-card" style={{height:280}}>
+                 <div className="card-title">Composição de Gastos ({selectedMonth}/{selectedYear})</div>
+                 {categoryStats.length > 0 ? (
+                   <ResponsiveContainer width="100%" height="88%">
+                     <PieChart>
+                       <Pie
+                         data={categoryStats}
+                         innerRadius={58} outerRadius={82}
+                         paddingAngle={4}
+                         dataKey="total"
+                         label={({name, percent}) => `${name} ${(percent*100).toFixed(0)}%`}
+                         labelLine={{stroke:'rgba(253,232,224,0.3)', strokeWidth:1}}
+                       >
+                         {categoryStats.map((entry, index) => (
+                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(0,0,0,0)" />
+                         ))}
+                       </Pie>
+                       <RechartsTooltip
+                         formatter={v => `R$ ${formatMoney(v)}`}
+                         contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
+                         itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
+                       />
+                     </PieChart>
+                   </ResponsiveContainer>
+                 ) : (
+                   <div style={{fontSize:11, color:'var(--text-tertiary)', marginTop:'2rem', textAlign:'center'}}>Sem despesas no período.</div>
+                 )}
+               </div>
+             </div>
+
+             {/* ROW 3: Horizontal BarChart de categorias */}
+             {categoryStats.length > 0 && (
+               <div className="card grid-card" style={{height: Math.max(180, categoryStats.length * 46 + 60)}}>
+                 <div className="card-title">Gasto por Categoria — detalhe</div>
+                 <ResponsiveContainer width="100%" height="88%">
+                   <BarChart
+                     data={categoryStats}
+                     layout="vertical"
+                     margin={{top:4, right:60, left:0, bottom:0}}
+                   >
+                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" horizontal={false} />
+                     <XAxis type="number" stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} />
+                     <YAxis type="category" dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} width={80} />
+                     <RechartsTooltip
+                       formatter={v => `R$ ${formatMoney(v)}`}
+                       contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
+                       itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
+                     />
+                     <Bar dataKey="total" radius={[0,4,4,0]} maxBarSize={20} label={{position:'right', fontSize:10, fill:'var(--text-secondary)', formatter: v => `R$ ${formatMoney(v)}`}}>
+                       {categoryStats.map((entry, index) => (
+                         <Cell key={`hbar-${index}`} fill={COLORS[index % COLORS.length]} />
+                       ))}
+                     </Bar>
+                   </BarChart>
+                 </ResponsiveContainer>
+               </div>
+             )}
+
            </main>
         )}
 

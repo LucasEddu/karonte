@@ -3,7 +3,8 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut,
-  updatePassword
+  updatePassword,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 
@@ -105,10 +106,7 @@ export const updateUsername = async (uid, newUsername) => {
   }
 };
 
-// Note: Resetting a user's password from admin side via Firebase Auth requires the Admin SDK (backend).
-// Since we are pure frontend, admins cannot directly manipulate *other* users' passwords without it.
-// Alternatively, we can use the password reset email flow.
-// We'll leave `updatePassword` strictly for the currently logged-in user.
+// Change own password (for the currently logged-in user only)
 export const changeOwnPassword = async (user, newPassword) => {
    try {
      await updatePassword(user, newPassword);
@@ -116,4 +114,36 @@ export const changeOwnPassword = async (user, newPassword) => {
      console.error("Error changing password:", error);
      throw error;
    }
-}
+};
+
+// Send password reset email to any user (Admin action — no backend needed)
+export const sendPasswordReset = async (email) => {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch(error) {
+    console.error("Error sending password reset:", error);
+    throw error;
+  }
+};
+
+// Create an admin user (can be called from browser console to bootstrap first admin)
+export const createAdminUser = async (email, password, fullName) => {
+  try {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    const userData = {
+      uid: user.uid,
+      email: email,
+      fullName: fullName,
+      username: fullName.split(' ')[0] || email.split('@')[0],
+      role: 'admin',
+      active: true,
+      createdAt: new Date().toISOString()
+    };
+    await setDoc(doc(db, 'users', user.uid), userData);
+    return { ...user, ...userData };
+  } catch(error) {
+    console.error("Error creating admin user:", error);
+    throw error;
+  }
+};
