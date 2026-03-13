@@ -1416,3 +1416,41 @@ h1, h2, h3, h4 { font-weight: 500; }
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* FORECAST CARD STYLES */
+.forecast-card.alert {
+  border: 1.5px solid rgba(163, 45, 45, 0.4);
+  background: linear-gradient(135deg, var(--surface-color) 0%, rgba(163, 45, 45, 0.08) 100%);
+  box-shadow: 0 8px 30px rgba(163, 45, 45, 0.1);
+}
+
+.forecast-card.alert .balance-label {
+  color: var(--danger-color);
+  font-weight: 600;
+}
+
+.forecast-badge {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  margin-top: 8px;
+}
+
+.forecast-badge.danger {
+  background-color: var(--danger-bg);
+  color: var(--danger-color);
+}
+
+.forecast-badge.success {
+  background-color: var(--success-bg);
+  color: var(--success-color);
+}
+
+/* Chrome, Safari, Edge, Opera - Fixing appearance lint */
+.budget-main-input::-webkit-outer-spin-button,
+.budget-main-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
