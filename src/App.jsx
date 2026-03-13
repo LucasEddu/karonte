@@ -105,6 +105,11 @@ function App() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
+  // --------- STATE: CHATBOT UI ---------
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+
   // --------- EFFECTS ---------
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -529,70 +534,105 @@ function App() {
   const [pendingAction, setPendingAction] = useState(null);
 
   const processChatMessage = (text) => {
-    // 1. Lowercase and Basic Parsing
-    const normalized = text.toLowerCase().trim();
+    // 1. Normalização profunda
+    const normalized = text.toLowerCase().trim()
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Remove acentos
     
-    // Check for contextual questions
-    if (normalized.includes('meu saldo') || normalized.includes('saldo atual')) {
+    // 2. Intents de Consulta (Respostas diretas)
+    if (/(saldo|dinheiro|quanto tenho)/.test(normalized)) {
        return { type: 'answer', text: `Seu saldo atual neste período é de R$ ${formatMoney(balance)}.` };
     }
-    if (normalized.includes('quanto gastei') || normalized.includes('total de saídas')) {
-       return { type: 'answer', text: `Você gastou R$ ${formatMoney(totalExpense)} nas despesas deste mês.` };
+    if (/(gasto|despesa|saida|quanto gastei)/.test(normalized)) {
+       return { type: 'answer', text: `Você gastou R$ ${formatMoney(totalExpense)} em despesas este mês.` };
+    }
+    if (/(receita|entrada|ganhei|recebi)/.test(normalized) && !/\d/.test(normalized)) {
+       return { type: 'answer', text: `Você recebeu R$ ${formatMoney(totalIncome)} em receitas este mês.` };
+    }
+    if (/(maior gasto|mais caro|gastei mais)/.test(normalized)) {
+       if(categoryStats.length === 0) return { type: 'answer', text: 'Você ainda não tem despesas registradas este mês.' };
+       const top = categoryStats[0];
+       return { type: 'answer', text: `Seu maior gasto este mês é com ${top.name}, totalizando R$ ${formatMoney(top.total)}.` };
+    }
+    if (/(resumo|balanco|geral)/.test(normalized)) {
+       const percent = totalIncome > 0 ? ((balance / totalIncome) * 100).toFixed(0) : '0';
+       return { type: 'answer', text: `Resumo do mês: Receitas R$ ${formatMoney(totalIncome)}, Despesas R$ ${formatMoney(totalExpense)}. Seu saldo está em R$ ${formatMoney(balance)} (${percent}% do total).` };
+    }
+    if (/(ajuda|socorro|que voce faz|comandos)/.test(normalized)) {
+       return { type: 'answer', text: 'Eu posso registrar seus gastos (ex: "50 no mercado") ou responder sobre suas finanças (ex: "qual meu saldo?", "maior gasto").' };
+    }
+    if (/(categoria|quais categorias)/.test(normalized)) {
+       return { type: 'answer', text: `Suas categorias de despesa são: ${expenseCategories.join(', ')}.` };
     }
 
-    // 2. Data Extraction via Regex
-    // Look for the first float or integer
-    const moneyMatch = normalized.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,2})?)/);
-    if (!moneyMatch) {
-       return { type: 'answer', text: 'Desculpe, não consegui identificar um valor (ex: "50", "120.50"). Pode tentar novamente?' };
+    // 3. Extração de Valor Robustecida
+    let numericValue = null;
+    let moneyMatch = normalized.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,3})?)\s?(k|mil)?/);
+    
+    if (moneyMatch) {
+      let valStr = moneyMatch[1].replace(',', '.');
+      numericValue = parseFloat(valStr);
+      if (moneyMatch[2] === 'k' || moneyMatch[2] === 'mil') numericValue *= 1000;
     }
 
-    const valueStr = moneyMatch[1].replace(',', '.');
-    const numericValue = parseFloat(valueStr);
+    if (!numericValue || isNaN(numericValue)) {
+       return { type: 'answer', text: 'Não consegui identificar o valor. Tente algo como "50 lanche" ou "1.5k salario".' };
+    }
 
-    // Remove the number from text to get description
-    let desc = normalized.replace(moneyMatch[0], '').trim();
-    if (desc.startsWith('-') || desc.startsWith('com ')) desc = desc.substring(1).trim();
-    if (!desc) desc = 'Registro via Assistente';
+    // 4. Extração de Descrição e Limpeza
+    let rawDesc = normalized.replace(moneyMatch[0], '').trim();
+    const stopwords = /^(com|no|na|de|do|da|pelo|por|o|a|um|uma|em|pro|pra|para|no|nos|nas)\s+/;
+    let cleanedDesc = rawDesc.replace(stopwords, '').trim();
+    
+    if (!cleanedDesc || cleanedDesc.length < 2) cleanedDesc = 'Registro via Assistente';
 
-    // 3. Inference rules
-    const incomeKeywords = ['salário', 'salario', 'freelance', 'receita', 'renda', 'bônus', 'bonus', 'pagamento'];
+    // 5. Inferência de Tipo
+    const incomeKeywords = ['salario', 'freelance', 'receita', 'renda', 'bonus', 'pagamento', 'ganhei', 'venda', 'pix recebido', 'reembolso'];
     let inferType = 'expense';
     if (incomeKeywords.some(kw => normalized.includes(kw))) inferType = 'income';
 
-    // Check custom income categories first (exact lowercase name match)
     if (inferType === 'expense') {
-      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase()));
+      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
       if (matchCustomIncome) inferType = 'income';
     }
 
-    // Check category mapping
+    // 6. Mapeamento de Categorias
     let inferCategory = 'Outros';
+    const categoryMaps = {
+      'Lazer': /(academia|cinema|bar|lazer|balada|jogo|game|festa|viagem|netflix|streaming|spotify|show|teatro|shopping|passeio)/,
+      'Alimentação': /(mercado|supermercado|restaurante|pizza|ifood|lanche|comida|padaria|acougue|feira|cafe|almoço|jantar|doce)/,
+      'Moradia': /(aluguel|reforma|condominio|luz|agua|conta|energia|internet|gas|iptu|moveis|casa|apartamento)/,
+      'Saúde': /(farmacia|medico|consulta|remedio|hospital|dentista|exame|saude|psicologo|terapia|plano)/,
+      'Transporte': /(transporte|uber|99|gasolina|combustivel|onibus|metro|trem|oficina|pedagio|estacionamento|carro|moto)/,
+    };
+
     if (inferType === 'expense') {
-       // Check custom expense categories first
-       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase()));
-       if (matchCustom) inferCategory = matchCustom;
-       else if (/(academia|cinema|bar|lazer|balada|jogo)/.test(normalized)) inferCategory = 'Lazer';
-       else if (/(mercado|supermercado|restaurante|pizza|ifood|lanche|comida|padaria)/.test(normalized)) inferCategory = 'Alimentação';
-       else if (/(aluguel|reforma|condomínio|condominio|luz|água|agua|conta)/.test(normalized)) inferCategory = 'Moradia';
-       else if (/(farmácia|farmacia|médico|medico|consulta|remédio|remedio)/.test(normalized)) inferCategory = 'Saúde';
-       else if (/(transporte|uber|99|gasolina|combustível|onibus|ônibus|metro|metrô)/.test(normalized)) inferCategory = 'Transporte';
+       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       if (matchCustom) {
+         inferCategory = matchCustom;
+       } else {
+         for (const [catName, regex] of Object.entries(categoryMaps)) {
+           if (regex.test(normalized)) {
+             inferCategory = catName;
+             break;
+           }
+         }
+       }
     } else {
-       // Check custom income categories
-       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase()));
-       if (matchCustom) inferCategory = matchCustom;
-       else if (/(salário|salario)/.test(normalized)) inferCategory = 'Salário';
-       else if (/(freelance)/.test(normalized)) inferCategory = 'Freelance';
+       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       if (matchCustom) {
+         inferCategory = matchCustom;
+       } else if (/(salario|pagamento|pro-labore)/.test(normalized)) inferCategory = 'Salário';
+       else if (/(freelance|projeto|job|freela)/.test(normalized)) inferCategory = 'Freelance';
+       else if (/(investimento|dividendos|juros|rendimento)/.test(normalized)) inferCategory = 'Investimentos';
     }
 
-    // Capitalize first letter of description for beauty
-    desc = desc.charAt(0).toUpperCase() + desc.slice(1);
+    cleanedDesc = cleanedDesc.charAt(0).toUpperCase() + cleanedDesc.slice(1);
 
     return {
        type: 'action',
        text: 'Entendi! Deseja registrar a seguinte movimentação?',
        payload: {
-          description: desc,
+          description: cleanedDesc,
           amount: numericValue,
           type: inferType,
           category: inferCategory
@@ -626,8 +666,13 @@ function App() {
        if (response.type === 'action') {
           setPendingAction(response.payload);
        }
+       if (!chatOpen) setUnreadCount(prev => prev + 1);
     }, 600); // Artificial thinking delay
   };
+
+  useEffect(() => {
+    if (chatOpen) setUnreadCount(0);
+  }, [chatOpen]);
 
   const handleChatConfirm = async () => {
      if (!pendingAction) return;
@@ -1198,70 +1243,6 @@ function App() {
                 </div>
               </section>
             </main>
-
-            {/* CHATBOT AI PANEL OVERLAY */}
-            <aside className="chatbot-panel">
-               <div className="chat-header">
-                  <div className="bot-avatar">⚡</div>
-                  <div className="bot-info">
-                     <span className="bot-name">Assistente Financeiro</span>
-                     <span className="bot-status">Online</span>
-                  </div>
-               </div>
-               
-               <div className="chat-messages">
-                  {chatMessages.map(msg => (
-                     <div key={msg.id} style={{display: 'flex', flexDirection: 'column'}}>
-                        <div className={`chat-bubble ${msg.sender}`}>
-                           {msg.text}
-                        </div>
-                        
-                        {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
-                         {(msg.sender === 'bot' && pendingAction && chatMessages[chatMessages.length - 1].id === msg.id && msg.text.includes('Deseja registrar')) ? (
-                           <div className="chat-action-card">
-                              <div className="action-title">Resumo Extraído</div>
-                              <div className="action-detail">
-                                 <span>Tipo:</span> <span className="action-val" style={{color: pendingAction.type === 'expense' ? 'var(--danger-color)' : 'var(--success-color)'}}>{pendingAction.type === 'income' ? 'Receita' : 'Despesa'}</span>
-                              </div>
-                              <div className="action-detail">
-                                 <span>Valor:</span> <span className="action-val">R$ {formatMoney(pendingAction.amount)}</span>
-                              </div>
-                              <div className="action-detail">
-                                 <span>Info:</span> <span className="action-val">{pendingAction.description}</span>
-                              </div>
-                              <div className="action-detail">
-                                 <span>Categoria:</span> <span className="action-val">{pendingAction.category}</span>
-                              </div>
-                              <div className="action-buttons">
-                                 <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>
-                                 <button className="btn-cancel" onClick={handleChatCancel}>Cancelar</button>
-                              </div>
-                           </div>
-                        ) : null}
-                     </div>
-                  ))}
-               </div>
-
-               <div className="chat-input-area">
-                  <div className="chat-suggestions">
-                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>🍟 50 ifood</div>
-                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>🚗 90 uber</div>
-                     <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>📊 Qual meu saldo?</div>
-                  </div>
-                  <form onSubmit={handleChatSubmit} className="chat-form">
-                     <input 
-                       type="text" 
-                       className="chat-input" 
-                       placeholder={pendingAction ? "Digite Sim ou Não..." : "Ex: 120 da academia"}
-                       value={chatInput}
-                       onChange={e => setChatInput(e.target.value)}
-                     />
-                     <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
-                        ↑
-                     </button>
-                  </form>
-               </div>
-            </aside>
           </div>
         )}
 
@@ -1400,11 +1381,10 @@ function App() {
                  </ResponsiveContainer>
                </div>
              ) : null}
+            </main>
+         )}
 
-           </main>
-        )}
-
-        {currentView === 'budgets' && (
+         {currentView === 'budgets' && (
            <main className="main-content">
              <div className="card list-section">
                 <div className="list-header">
@@ -1448,6 +1428,78 @@ function App() {
            </main>
         )}
       </div>
+
+      {/* CHATBOT FLOATING UI */}
+      <button className={`chat-fab ${unreadCount > 0 ? 'has-unread' : ''}`} onClick={() => setChatOpen(!chatOpen)}>
+         ⚡
+         {unreadCount > 0 ? <span className="fab-badge">{unreadCount}</span> : null}
+      </button>
+
+      <aside className={`chatbot-float-window ${chatOpen ? 'open' : ''}`}>
+          <div className="chat-header">
+            <div style={{display:'flex', alignItems:'center', gap: 10}}>
+              <div className="bot-avatar">⚡</div>
+              <div className="bot-info">
+                  <span className="bot-name">Assistente Karonte</span>
+                  <span className="bot-status">Online</span>
+              </div>
+            </div>
+            <button className="chat-close-btn" onClick={() => setChatOpen(false)}>×</button>
+          </div>
+          
+          <div className="chat-messages">
+            {chatMessages.map(msg => (
+                <div key={msg.id} style={{display: 'flex', flexDirection: 'column'}}>
+                  <div className={`chat-bubble ${msg.sender}`}>
+                      {msg.text}
+                  </div>
+                  
+                  {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
+                    {(msg.sender === 'bot' && pendingAction && chatMessages[chatMessages.length - 1].id === msg.id && msg.text.includes('Deseja registrar')) ? (
+                      <div className="chat-action-card">
+                        <div className="action-title">Resumo Extraído</div>
+                        <div className="action-detail">
+                            <span>Tipo:</span> <span className="action-val" style={{color: pendingAction.type === 'expense' ? 'var(--danger-color)' : 'var(--success-color)'}}>{pendingAction.type === 'income' ? 'Receita' : 'Despesa'}</span>
+                        </div>
+                        <div className="action-detail">
+                            <span>Valor:</span> <span className="action-val">R$ {formatMoney(pendingAction.amount)}</span>
+                        </div>
+                        <div className="action-detail">
+                            <span>Info:</span> <span className="action-val">{pendingAction.description}</span>
+                        </div>
+                        <div className="action-detail">
+                            <span>Categoria:</span> <span className="action-val">{pendingAction.category}</span>
+                        </div>
+                        <div className="action-buttons">
+                            <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>
+                            <button className="btn-cancel" onClick={handleChatCancel}>Cancelar</button>
+                        </div>
+                      </div>
+                  ) : null}
+                </div>
+            ))}
+          </div>
+
+          <div className="chat-input-area">
+            <div className="chat-suggestions">
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>🍟 50 ifood</div>
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>🚗 90 uber</div>
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>📊 Qual meu saldo?</div>
+            </div>
+            <form onSubmit={handleChatSubmit} className="chat-form">
+                <input 
+                  type="text" 
+                  className="chat-input" 
+                  placeholder={pendingAction ? "Sim ou Não..." : "Ex: 120 da academia"}
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                />
+                <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
+                  ↑
+                </button>
+            </form>
+          </div>
+      </aside>
     </div>
   );
 }
