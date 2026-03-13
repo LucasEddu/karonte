@@ -625,6 +625,11 @@ function App() {
     // 2. Build Context
     const ctx = buildMonthlyInsightContext(month, year);
     
+    // Fallback if no data
+    if (ctx.income === 0 && ctx.expense === 0) {
+      return `Ainda não tenho dados suficientes para o mês de ${month}/${year}. Assim que você registrar suas primeiras movimentações, poderei gerar um resumo inteligente para você! 📊`;
+    }
+
     // 3. Simulate IA response (Karonte Voice)
     // Here we could call a real LLM API, but we'll use a template that mimics the requested tone
     const insight = `Seu resumo de ${month}/${year} chegou! ✨
@@ -840,13 +845,35 @@ function App() {
     const input = chatInput.trim();
     if (!input) return;
 
+    const normalizedInput = input.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
     // 1. Handle Simple Confirm/Cancel for the CURRENT pending action
     if (pendingActions.length > 0) {
-       const normalized = input.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-       if (normalized === 'sim' || normalized === 's') { handleChatConfirm(); return; }
-       if (normalized === 'nao' || normalized === 'n') { handleChatCancel(); return; }
+       if (normalizedInput === 'sim' || normalizedInput === 's') { handleChatConfirm(); return; }
+       if (normalizedInput === 'nao' || normalizedInput === 'n') { handleChatCancel(); return; }
        
        // 2. Handle Potential Correction if not Sim/Nao
+       // Improved: try to extract just values/categories first to be less destructive
+       const moneyMatch = normalizedInput.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,3})?)\s?(k|mil)?/);
+       if (moneyMatch) {
+          let valStr = moneyMatch[1].replace(',', '.');
+          let newVal = parseFloat(valStr);
+          if (moneyMatch[2] === 'k' || moneyMatch[2] === 'mil') newVal *= 1000;
+          
+          if (!isNaN(newVal)) {
+            const updated = [...pendingActions];
+            updated[0] = { ...updated[0], amount: newVal };
+            setPendingActions(updated);
+            setChatMessages(prev => [
+              ...prev, 
+              { id: crypto.randomUUID(), sender: 'user', text: input },
+              { id: crypto.randomUUID(), sender: 'bot', text: `Entendi! Alterei o valor para R$ ${formatMoney(newVal)}. Deseja confirmar agora?` }
+            ]);
+            setChatInput('');
+            return;
+          }
+       }
+
        const correction = processChatMessage(input);
        if (correction.type === 'action') {
           const updated = [...pendingActions];
@@ -871,20 +898,20 @@ function App() {
     const parts = input.split(/\s+e\s+|,\s+/);
     
     // Check for Monthly Insight Intent first (as it might be async)
-    if (/(resumo de|como foi|resumo do mes)/.test(input.toLowerCase())) {
+    // NORMALIZED regex check
+    if (/(resumo de|como foi|resumo do mes)/.test(normalizedInput)) {
         const monthsMap = {
-          'janeiro': 1, 'fevereiro': 2, 'março': 3, 'abril': 4, 'maio': 5, 'junho': 6,
+          'janeiro': 1, 'fevereiro': 2, 'marco': 3, 'abril': 4, 'maio': 5, 'junho': 6,
           'julho': 7, 'agosto': 8, 'setembro': 9, 'outubro': 10, 'novembro': 11, 'dezembro': 12
         };
-        const lowerInput = input.toLowerCase();
         let tM = selectedMonth;
         let tY = selectedYear;
 
         Object.keys(monthsMap).forEach(mName => {
-          if (lowerInput.includes(mName)) tM = monthsMap[mName];
+          if (normalizedInput.includes(mName)) tM = monthsMap[mName];
         });
 
-        if (lowerInput.includes('mês passado')) {
+        if (normalizedInput.includes('mes passado')) {
           const d = new Date();
           d.setMonth(d.getMonth() - 1);
           tM = d.getMonth() + 1;
