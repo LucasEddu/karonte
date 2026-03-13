@@ -13,6 +13,10 @@
   --text-tertiary: rgba(253, 232, 224, 0.70);
   --text-highlight: #D85A30;
   
+  --input-bg: #3a1e1e;
+  --input-focus-bg: #4a2424;
+  --input-border: rgba(253, 232, 224, 0.40);
+  
   --primary-color: #D85A30;
   --primary-bg: rgba(216, 90, 48, 0.15);
   --primary-text: #ffffff;
@@ -42,15 +46,20 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
   --bg-color: #fff7f5;        
   --surface-color: #ffffff;   
   --border-color: #f5c4b3;
   --border-light: rgba(245, 196, 179, 0.4);
   --border-medium: rgba(245, 196, 179, 0.8);
   --text-primary: #4A1B0C;
-  --text-secondary: rgba(216, 90, 48, 0.60);
-  --text-tertiary: rgba(216, 90, 48, 0.50);
+  --text-secondary: rgba(216, 90, 48, 0.85);
+  --text-tertiary: rgba(216, 90, 48, 0.70);
   --text-highlight: #D85A30;
+
+  --input-bg: #ffffff;
+  --input-focus-bg: #fffcfb;
+  --input-border: #f5c4b3;
   
   --primary-color: #D85A30;
   --primary-bg: rgba(216, 90, 48, 0.15); 

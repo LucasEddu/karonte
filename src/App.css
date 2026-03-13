@@ -338,8 +338,8 @@ h1, h2, h3, h4 { font-weight: 500; }
 }
 
 .form-group input, .form-group select {
-  background-color: #3a1e1e;
-  border: 1px solid rgba(253, 232, 224, 0.40);
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   color: var(--text-primary);
   padding: 8px 12px;
@@ -349,7 +349,7 @@ h1, h2, h3, h4 { font-weight: 500; }
 .form-group input:focus, .form-group select:focus {
   outline: none;
   border-color: var(--primary-color);
-  background-color: #4a2424;
+  background-color: var(--input-focus-bg);
   box-shadow: 0 0 0 2px rgba(216, 90, 48, 0.18);
 }
 
@@ -626,7 +626,7 @@ h1, h2, h3, h4 { font-weight: 500; }
 }
 
 .month-select option, .year-select option {
-  background-color: #1a0c0c; /* Força fundo escuro no menu aberto */
+  background-color: var(--surface-color); /* Usa a superfície do tema ativo */
   color: var(--text-primary);
 }
 
