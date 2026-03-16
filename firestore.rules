@@ -58,9 +58,21 @@ service cloud.firestore {
     }
 
     // ─── Coleção: budgets ────────────────────────────────────────
-    match /budgets/{uid} {
-      // Usuário só acessa seus próprios orçamentos.
-      allow read, write: if isAuthenticated() && isActiveUser() && isOwner(uid);
+    match /budgets/{docId} {
+      // Usuário só acessa seus próprios orçamentos (agora o docId pode ser uid_projectId)
+      allow read, write: if isAuthenticated() && isActiveUser() && docId.matches('^' + request.auth.uid + '.*');
+    }
+
+    // ─── Coleção: projects ───────────────────────────────────────
+    match /projects/{projectId} {
+      // Usuário só acessa seus próprios projetos.
+      allow read, update, delete: if isAuthenticated()
+        && isActiveUser()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if isAuthenticated()
+        && isActiveUser()
+        && request.resource.data.userId == request.auth.uid;
     }
 
     // ─── Bloqueia tudo que não foi explicitamente liberado ───────

@@ -6,14 +6,16 @@ import {
   getDoc 
 } from 'firebase/firestore';
 
-export const saveUserBudgets = async (budgetsData) => {
+export const saveUserBudgets = async (budgetsData, projectId = null) => {
   try {
     const user = auth.currentUser;
     if (!user) throw new Error("No authenticated user");
 
-    // We will save user budgets as a single document under 'budgets' collection with the ID = user.uid
-    // Structure: { 'Moradia': 1500, 'Lazer': 300 }
-    await setDoc(doc(db, 'budgets', user.uid), budgetsData);
+    // We will save user budgets as a single document under 'budgets' collection with the ID = user.uid + _ + projectId
+    // If it's the general budget, just use user.uid
+    const docId = projectId ? `${user.uid}_${projectId}` : user.uid;
+    
+    await setDoc(doc(db, 'budgets', docId), budgetsData);
     
     return budgetsData;
   } catch (error) {
@@ -22,9 +24,10 @@ export const saveUserBudgets = async (budgetsData) => {
   }
 };
 
-export const getUserBudgets = async (userId) => {
+export const getUserBudgets = async (userId, projectId = null) => {
   try {
-    const docRef = doc(db, 'budgets', userId);
+    const docId = projectId ? `${userId}_${projectId}` : userId;
+    const docRef = doc(db, 'budgets', docId);
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {

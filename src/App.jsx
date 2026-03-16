@@ -13,6 +13,7 @@ import { addTransaction, getUserTransactions, deleteTransaction } from './servic
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
+import { getUserProjects, createProject, deleteProject } from './services/projectService';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -115,6 +116,12 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
 
+  // --------- STATE: PROJECTS / TABS ---------
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(null); // null = Geral
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+
 
   // --------- EFFECTS ---------
   useEffect(() => {
@@ -205,19 +212,26 @@ function App() {
     }
   }, [currentUser, transactions.length, dataLoading]);
 
-  // Fetch user data when currentUser changes
+  // Fetch user projects
+  useEffect(() => {
+    if (currentUser) {
+      getUserProjects(currentUser.uid).then(setProjects).catch(console.error);
+    }
+  }, [currentUser]);
+
+  // Fetch user data when currentUser or activeProjectId changes
   useEffect(() => {
     const fetchData = async () => {
        if (!currentUser) return;
        setDataLoading(true);
        try {
-         const txs = await getUserTransactions(currentUser.uid);
+         const txs = await getUserTransactions(currentUser.uid, activeProjectId);
          setTransactions(txs);
          
-         const userBudgets = await getUserBudgets(currentUser.uid);
+         const userBudgets = await getUserBudgets(currentUser.uid, activeProjectId);
          setBudgets(userBudgets);
 
-         // Load custom categories
+         // Load custom categories (categories are global, not per project)
          const cats = await getUserCategories(currentUser.uid);
          setCustomCategories(cats);
          
@@ -232,7 +246,7 @@ function App() {
        }
     };
     fetchData();
-  }, [currentUser]);
+  }, [currentUser, activeProjectId]);
 
   // RECURRING TRANSACTIONS EFFECT: Runs once on login to process recurrences
   useEffect(() => {
@@ -406,10 +420,21 @@ function App() {
     };
     
     try {
-      const savedDoc = await addTransaction(newTransaction);
+      const savedDoc = await addTransaction(newTransaction, activeProjectId);
       setTransactions([savedDoc, ...transactions]);
       setDescription(''); setAmount(''); setCategory(''); setIsRecurring(false);
     } catch(err) { alert('Erro ao salvar transação.'); }
+  };
+
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return;
+    try {
+      const proj = await createProject(newProjectName.trim());
+      setProjects(prev => [...prev, proj]);
+      setShowProjectModal(false);
+      setNewProjectName('');
+      setActiveProjectId(proj.id);
+    } catch (err) { alert('Erro ao criar projeto.'); }
   };
 
   const handleDelete = async (id) => {
@@ -588,7 +613,7 @@ function App() {
     else newBudgets[activeBudgetCat] = finalVal;
 
     try {
-       await saveUserBudgets(newBudgets);
+       await saveUserBudgets(newBudgets, activeProjectId);
        setBudgets(newBudgets);
        setBudgetModalOpen(false);
     } catch(err) { alert('Erro ao salvar orçamento.')}
@@ -1393,6 +1418,52 @@ function App() {
           </div>
         </header>
 
+        {/* PROJECT TABS */}
+        <div className="project-tabs" style={{ 
+          display: 'flex', gap: '10px', padding: '10px 20px', 
+          backgroundColor: 'var(--bg-secondary)', 
+          borderBottom: '1px solid var(--border-color)', 
+          overflowX: 'auto', WebkitOverflowScrolling: 'touch' 
+        }}>
+           <button 
+             onClick={() => setActiveProjectId(null)}
+             style={{ 
+               padding: '6px 14px', borderRadius: '20px', border: 'none', 
+               background: activeProjectId === null ? 'var(--primary-color)' : 'transparent', 
+               color: activeProjectId === null ? '#fff' : 'var(--text-secondary)', 
+               cursor: 'pointer', fontWeight: activeProjectId === null ? '600' : 'normal',
+               whiteSpace: 'nowrap', transition: 'all 0.2s'
+             }}
+           >
+             Geral
+           </button>
+           {projects.map(p => (
+             <button 
+               key={p.id}
+               onClick={() => setActiveProjectId(p.id)}
+               style={{ 
+                 padding: '6px 14px', borderRadius: '20px', border: 'none', 
+                 background: activeProjectId === p.id ? 'var(--primary-color)' : 'transparent', 
+                 color: activeProjectId === p.id ? '#fff' : 'var(--text-secondary)', 
+                 cursor: 'pointer', fontWeight: activeProjectId === p.id ? '600' : 'normal',
+                 whiteSpace: 'nowrap', transition: 'all 0.2s'
+               }}
+             >
+               {p.name}
+             </button>
+           ))}
+           <button 
+             onClick={() => setShowProjectModal(true)} 
+             style={{ 
+               padding: '6px 14px', borderRadius: '20px', border: '1px dashed var(--border-color)', 
+               background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', 
+               whiteSpace: 'nowrap', transition: 'all 0.2s'
+             }}
+           >
+             + Novo Projeto
+           </button>
+        </div>
+
         {currentView === 'dashboard' && (
           <div className="dashboard-layout">
             <main className="dashboard-main main-content">
@@ -1909,6 +1980,36 @@ function App() {
                  <button className="btn-confirm" onClick={handleConfirmBudget}>Salvar Limite</button>
               </div>
            </div>
+        </div>
+      )}
+      {/* NEW PROJECT MODAL */}
+      {showProjectModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth: 400}}>
+            <div className="modal-header">
+              <h2>Novo Projeto Orçamentário</h2>
+              <button className="close-btn" onClick={() => setShowProjectModal(false)}>✕</button>
+            </div>
+            <p style={{fontSize: 13, color: 'var(--text-tertiary)', marginBottom: 20}}>
+              Crie projetos para gerenciar orçamentos separados (ex: "Construção da Casa", "Casamento 2025").
+            </p>
+            
+            <div className="form-group">
+              <label>Nome do Projeto</label>
+              <input 
+                 type="text" 
+                 value={newProjectName} 
+                 onChange={e => setNewProjectName(e.target.value)} 
+                 placeholder="Digite o nome..." 
+                 autoFocus
+              />
+            </div>
+            
+            <div className="modal-actions" style={{display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20}}>
+              <button className="text-btn" onClick={() => setShowProjectModal(false)}>Cancelar</button>
+              <button className="submit-btn" onClick={handleCreateProject}>Criar Projeto</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
