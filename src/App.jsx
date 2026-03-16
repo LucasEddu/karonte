@@ -116,6 +116,25 @@ function App() {
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
 
+  // --------- STATE: DRAGGABLE CHAT FAB ---------
+  const [fabPosition, setFabPosition] = useState(() => {
+    if (typeof window === 'undefined') return { x: 0, y: 0 };
+    try {
+      const stored = localStorage.getItem('karonte_fab_pos');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') return parsed;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    const defaultX = window.innerWidth - 30 - 56; // right: 30px, width: 56px
+    const defaultY = window.innerHeight - 30 - 56; // bottom: 30px, height: 56px
+    return { x: defaultX, y: defaultY };
+  });
+  const [isDraggingFab, setIsDraggingFab] = useState(false);
+  const fabOffsetRef = useRef({ x: 0, y: 0 });
+
   // --------- STATE: PROJECTS / TABS ---------
   const [projects, setProjects] = useState([]);
   const [activeProjectId, setActiveProjectId] = useState(null); // null = Geral
@@ -718,6 +737,48 @@ function App() {
   const [chatInput, setChatInput] = useState('');
   const [pendingActions, setPendingActions] = useState([]); // Array para suportar múltiplos lançamentos
 
+  // --------- EFFECTS: DRAGGABLE CHAT FAB ---------
+  useEffect(() => {
+    if (!isDraggingFab) return;
+
+    const handleMove = (e) => {
+      if (typeof window === 'undefined') return;
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+      if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
+
+      const rawX = clientX - fabOffsetRef.current.x;
+      const rawY = clientY - fabOffsetRef.current.y;
+
+      const maxX = window.innerWidth - 56; // 56 = botão
+      const maxY = window.innerHeight - 56;
+
+      const clamped = {
+        x: Math.min(Math.max(10, rawX), maxX - 10),
+        y: Math.min(Math.max(10, rawY), maxY - 10),
+      };
+
+      setFabPosition(clamped);
+      try {
+        localStorage.setItem('karonte_fab_pos', JSON.stringify(clamped));
+      } catch {
+        // ignore storage errors
+      }
+    };
+
+    const handleUp = () => {
+      setIsDraggingFab(false);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isDraggingFab]);
+
   const processChatMessage = (text) => {
     // 1. Normalização profunda
     const normalized = text.toLowerCase().trim()
@@ -1097,6 +1158,46 @@ function App() {
      if(pendingActions.length > 0) return;
      setChatInput(txt);
   };
+
+  const handleFabMouseDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingFab(true);
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    fabOffsetRef.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    };
+  };
+
+  const chatWindowStyle = useMemo(() => {
+    if (typeof window === 'undefined') return {};
+
+    const width = 350;
+    const height = 520;
+
+    const fabCenterX = fabPosition.x + 28;
+    const fabCenterY = fabPosition.y + 28;
+
+    let x = fabCenterX - width / 2;
+    let y = fabCenterY - height - 16;
+
+    const maxX = window.innerWidth - width - 10;
+    const maxY = window.innerHeight - height - 10;
+
+    if (x < 10) x = 10;
+    if (x > maxX) x = maxX;
+    if (y < 10) y = 10;
+    if (y > maxY) y = maxY;
+
+    return {
+      left: `${x}px`,
+      top: `${y}px`,
+      transformOrigin: 'center bottom'
+    };
+  }, [fabPosition]);
+
 
 
   // ================= VIEWS =================
@@ -1865,12 +1966,22 @@ function App() {
         )}
       </div>
 
-      <button className={`chat-fab ${unreadCount > 0 ? 'has-unread' : ''}`} onClick={() => setChatOpen(!chatOpen)}>
-         <img src="/karonte-favicon-light.svg" alt="Karonte" className="fab-icon-img" />
-         {unreadCount > 0 ? <span className="fab-badge">{unreadCount}</span> : null}
-      </button>
+      {!chatOpen && (
+        <button
+          className={`chat-fab ${unreadCount > 0 ? 'has-unread' : ''}`}
+          onClick={() => { if (!isDraggingFab) setChatOpen(true); }}
+          onMouseDown={handleFabMouseDown}
+          style={{ left: `${fabPosition.x}px`, top: `${fabPosition.y}px` }}
+        >
+          <img src="/karonte-favicon-light.svg" alt="Karonte" className="fab-icon-img" />
+          {unreadCount > 0 ? <span className="fab-badge">{unreadCount}</span> : null}
+        </button>
+      )}
 
-      <aside className={`chatbot-float-window ${chatOpen ? 'open' : ''}`}>
+      <aside
+        className={`chatbot-float-window ${chatOpen ? 'open' : ''}`}
+        style={chatWindowStyle}
+      >
           <div className="chat-header">
             <div style={{display:'flex', alignItems:'center', gap: 10}}>
               <div className="bot-avatar">
