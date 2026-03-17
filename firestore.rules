@@ -115,6 +115,11 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
     }
 
+    // userCategories: docId == uid
+    match /userCategories/{uid} {
+      allow read, write: if isAuthenticated() && isActiveUser() && request.auth.uid == uid;
+    }
+
     // Bloqueia tudo que não foi explicitamente liberado
     match /{document=**} {
       allow read, write: if false;

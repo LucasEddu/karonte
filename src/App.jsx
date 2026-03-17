@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import './App.css';
 import { auth } from './config/firebase';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
@@ -506,7 +506,10 @@ function App() {
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
       setTransactions([savedDoc, ...transactions]);
       setDescription(''); setAmount(''); setCategory(''); setIsRecurring(false);
-    } catch(err) { alert('Erro ao salvar transação.'); }
+    } catch(err) { 
+      console.error('Erro ao salvar transação:', err);
+      alert('Erro ao salvar transação.'); 
+    }
   };
 
   const handleCreateProject = async () => {
@@ -682,7 +685,10 @@ function App() {
      try {
        await deleteTransaction(id);
        setTransactions(transactions.filter(t => t.id !== id));
-     } catch (err) { alert('Erro ao deletar') }
+     } catch (err) { 
+       console.error(err);
+       alert('Erro ao deletar');
+     }
   };
 
 
@@ -958,7 +964,7 @@ function App() {
     }
   };
 
-  const handleRemoveCustomCategory = async (catName, catType) => {
+  const handleRemoveCustomCategory = async (catName) => {
     if (!currentUser) return;
     const updated = {
       expense: customCategories.expense.filter(c => c !== catName),
@@ -1397,12 +1403,14 @@ function App() {
            ? `Registrado! Vamos para o próximo: ${updatedActions[0].description}?` 
            : `Feito! Registrei ${action.type === 'income' ? 'a receita' : 'a despesa'} com sucesso.` }
       ]);
-    } catch(err) { alert('Erro ao registrar via chat') }
+    } catch(err) {
+      console.error('Erro ao registrar via chat:', err);
+      alert('Erro ao registrar via chat');
+    }
   };
 
   const handleChatCancel = () => {
     if (pendingActions.length === 0) return;
-    const action = pendingActions[0];
     const updatedActions = pendingActions.slice(1);
     setPendingActions(updatedActions);
     setChatInput('');
@@ -1809,7 +1817,7 @@ function App() {
                </select>
             </div>
             {filteredTransactions.length > 0 ? (
-               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Descarga</button>
+               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relatório</button>
             ) : null}
             <div className="divider"></div>
             <button onClick={toggleTheme} className="text-btn" style={{marginRight: 10, fontSize: '14px', alignSelf: 'center'}} title="Mudar Tema">
