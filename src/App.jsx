@@ -1757,12 +1757,17 @@ function App() {
               <span>{new Date(selectedYear, selectedMonth-1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}</span>
             </div>
             <div className="notifications-wrap">
-              <button type="button" className="notifications-btn" onClick={() => setShowNotificationsPanel(prev => !prev)} title="Notificações">
+              <button
+                type="button"
+                className="notifications-btn"
+                onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
+                title="Notificações"
+              >
                 🔔
                 {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
               </button>
               {showNotificationsPanel && (
-                <div className="notifications-dropdown">
+                <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
                   <div className="notifications-dropdown-header">Notificações</div>
                   {invites.length === 0 && notifications.length === 0 && (
                     <div className="notifications-empty">Nenhuma notificação.</div>

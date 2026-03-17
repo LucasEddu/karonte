@@ -1960,6 +1960,22 @@ h1, h2, h3, h4 { font-weight: 500; }
   border-top: 1px solid var(--border-color);
 }
 
+.settings-block .form-group {
+  margin-bottom: 14px;
+}
+
+.settings-block .submit-btn,
+.settings-block .btn-confirm,
+.settings-block .btn-secondary,
+.settings-card .submit-btn {
+  margin-top: 10px;
+}
+
+.settings-block .modal-actions,
+.settings-block .modal-footer {
+  margin-top: 12px;
+}
+
 .settings-block h3 {
   font-size: 13px;
   margin-bottom: 6px;

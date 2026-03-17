@@ -40,11 +40,11 @@ export const getInvitesByEmail = async (email) => {
     if (!email) return [];
     const q = query(
       collection(db, COLLECTION_NAME),
-      where('toEmail', '==', email.trim().toLowerCase()),
-      where('status', '==', 'pending')
+      where('toEmail', '==', email.trim().toLowerCase())
     );
     const snap = await getDocs(q);
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return list.filter(i => i.status === 'pending');
   } catch (error) {
     console.error('Error fetching invites:', error);
     throw error;

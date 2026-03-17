@@ -15,6 +15,10 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true;
     }
 
+    function userEmail() {
+      return request.auth.token.email;
+    }
+
     // projects (owner or in collaborators; compat: docs without collaborators = owner only)
     function isProjectMember(projectId) {
       let p = get(/databases/$(database)/documents/projects/$(projectId)).data;
@@ -76,13 +80,21 @@ service cloud.firestore {
         && (resource.data.get('projectId', null) != null && isProjectMember(request.resource.data.projectId));
     }
 
-    // invites: fromUid or toUid can read; only fromUid can update (accept/reject)
+    // invites: sender (fromUid) or recipient (by email/uid) can read/update
     match /invites/{inviteId} {
       allow read: if isAuthenticated() && isActiveUser()
-        && (resource.data.fromUid == request.auth.uid || resource.data.get('toUid', '') == request.auth.uid);
+        && (
+          resource.data.fromUid == request.auth.uid
+          || resource.data.get('toUid', '') == request.auth.uid
+          || (resource.data.get('toEmail', '') != '' && resource.data.toEmail == userEmail())
+        );
       allow create: if isAuthenticated() && isActiveUser() && request.resource.data.fromUid == request.auth.uid;
       allow update: if isAuthenticated() && isActiveUser()
-        && (resource.data.fromUid == request.auth.uid || resource.data.get('toUid', '') == request.auth.uid);
+        && (
+          resource.data.fromUid == request.auth.uid
+          || resource.data.get('toUid', '') == request.auth.uid
+          || (resource.data.get('toEmail', '') != '' && resource.data.toEmail == userEmail())
+        );
       allow delete: if isAuthenticated() && isActiveUser() && resource.data.fromUid == request.auth.uid;
     }
 
