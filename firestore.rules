@@ -3,79 +3,58 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ─── Helper functions ────────────────────────────────────────
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(uid) {
-      return request.auth.uid == uid;
-    }
-
+    // Helper functions
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(uid) { return request.auth.uid == uid; }
     function isAdmin() {
       return isAuthenticated() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
-
     function isActiveUser() {
       return isAuthenticated() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true;
     }
 
-    // ─── Coleção: users ──────────────────────────────────────────
+    // users
     match /users/{uid} {
-      // Qualquer usuário autenticado e ativo pode ler seu próprio documento.
-      // Admin pode ler todos.
       allow read: if isOwner(uid) && isActiveUser() || isAdmin();
-
-      // Usuário pode criar/atualizar seu próprio doc, mas NÃO pode definir role=admin.
-      allow create: if isOwner(uid)
-        && request.resource.data.role == 'user'
-        && request.resource.data.active == true;
-
-      // Usuário pode atualizar campos permitidos do próprio doc (ex: username),
-      // mas não pode alterar 'role' nem 'active'.
+      allow create: if isOwner(uid) && request.resource.data.role == 'user' && request.resource.data.active == true;
       allow update: if isOwner(uid)
         && !('role' in request.resource.data.diff(resource.data).affectedKeys())
         && !('active' in request.resource.data.diff(resource.data).affectedKeys())
         || isAdmin();
-
-      // Só admin pode deletar usuários.
       allow delete: if isAdmin();
     }
 
-    // ─── Coleção: transactions ───────────────────────────────────
+    // transactions
     match /transactions/{transactionId} {
-      // Usuário só acessa suas próprias transações.
+      allow read, write: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isActiveUser() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // budgets
+    match /budgets/{docId} {
+      allow read, write: if isAuthenticated() && isActiveUser() && docId.matches('^' + request.auth.uid + '.*');
+    }
+
+    // projects
+    match /projects/{projectId} {
+      allow read, update, delete: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isActiveUser() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // tasks (tarefas por projeto)
+    match /tasks/{taskId} {
       allow read, write: if isAuthenticated()
         && isActiveUser()
         && resource.data.userId == request.auth.uid;
 
-      // Na criação, garante que userId pertence ao criador.
       allow create: if isAuthenticated()
         && isActiveUser()
         && request.resource.data.userId == request.auth.uid;
     }
 
-    // ─── Coleção: budgets ────────────────────────────────────────
-    match /budgets/{docId} {
-      // Usuário só acessa seus próprios orçamentos (agora o docId pode ser uid_projectId)
-      allow read, write: if isAuthenticated() && isActiveUser() && docId.matches('^' + request.auth.uid + '.*');
-    }
-
-    // ─── Coleção: projects ───────────────────────────────────────
-    match /projects/{projectId} {
-      // Usuário só acessa seus próprios projetos.
-      allow read, update, delete: if isAuthenticated()
-        && isActiveUser()
-        && resource.data.userId == request.auth.uid;
-
-      allow create: if isAuthenticated()
-        && isActiveUser()
-        && request.resource.data.userId == request.auth.uid;
-    }
-
-    // ─── Bloqueia tudo que não foi explicitamente liberado ───────
+    // Bloqueia tudo que não foi explicitamente liberado
     match /{document=**} {
       allow read, write: if false;
     }

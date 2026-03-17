@@ -4,6 +4,7 @@ import {
   addDoc, 
   deleteDoc, 
   doc, 
+  updateDoc,
   query, 
   where, 
   getDocs 
@@ -40,6 +41,16 @@ export const getUserProjects = async (userId) => {
     return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   } catch (error) {
     console.error("Error fetching projects:", error);
+    throw error;
+  }
+};
+
+export const updateProject = async (id, data) => {
+  try {
+    const ref = doc(db, COLLECTION_NAME, id);
+    await updateDoc(ref, { ...data, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error("Error updating project:", error);
     throw error;
   }
 };

@@ -13,7 +13,8 @@ import { addTransaction, getUserTransactions, deleteTransaction } from './servic
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
-import { getUserProjects, createProject, deleteProject } from './services/projectService';
+import { getUserProjects, createProject, deleteProject, updateProject } from './services/projectService';
+import { getProjectTasks, addTask, updateTask, deleteTask } from './services/taskService';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -142,6 +143,24 @@ function App() {
   const [activeProjectId, setActiveProjectId] = useState(null); // null = Geral
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [projectToDelete, setProjectToDelete] = useState(null); // { id, name } or null
+  const [projectToRename, setProjectToRename] = useState(null); // { id, name } or null
+  const [renameProjectValue, setRenameProjectValue] = useState('');
+
+  // --------- STATE: TASKS (Tarefas pendentes por projeto) ---------
+  const [tasks, setTasks] = useState([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [taskEditId, setTaskEditId] = useState(null); // null = nova tarefa
+  const [taskTitleInput, setTaskTitleInput] = useState('');
+  const [taskTypeInput, setTaskTypeInput] = useState('tarefa'); // 'tarefa' | 'despesa'
+  const [taskMetaValueInput, setTaskMetaValueInput] = useState(''); // valor meta (string para input)
+  const [taskParcelasInput, setTaskParcelasInput] = useState(''); // número de parcelas
+  const [taskSaving, setTaskSaving] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [taskToPay, setTaskToPay] = useState(null); // task para abater
+  const [paymentAmountInput, setPaymentAmountInput] = useState('');
+  const [paymentSaving, setPaymentSaving] = useState(false);
 
 
   // --------- EFFECTS ---------
@@ -193,10 +212,10 @@ function App() {
       if (forecast.isHigh) {
         setTimeout(() => {
           const alertMsg = `Olá! Notei que seu ritmo de gastos este mês está **${forecast.variationPct.toFixed(0)}% acima** da sua média. Sua previsão de fechamento é de **R$ ${formatMoney(forecast.forecastAmount)}**. Quer ver onde pode economizar?`;
-          setMessages(prev => {
+          setChatMessages(prev => {
              const last = prev[prev.length - 1];
              if (last && last.text.includes('ritmo de gastos')) return prev;
-             return [...prev, { text: alertMsg, sender: 'bot' }];
+             return [...prev, { id: crypto.randomUUID(), text: alertMsg, sender: 'bot' }];
           });
         }, 1000);
       }
@@ -222,7 +241,7 @@ function App() {
           
           const insight = await generateAIInsight(pM, pY);
           if (insight) {
-            setMessages(prev => [...prev, { text: insight, sender: 'bot' }]);
+            setChatMessages(prev => [...prev, { id: crypto.randomUUID(), text: insight, sender: 'bot' }]);
             setChatOpen(true);
             setUnreadCount(prev => prev + 1);
             localStorage.setItem(`karonte_last_insight_${currentUser.uid}`, `${currentM}_${currentY}`);
@@ -239,6 +258,19 @@ function App() {
       getUserProjects(currentUser.uid).then(setProjects).catch(console.error);
     }
   }, [currentUser]);
+
+  // Fetch tasks for active project
+  useEffect(() => {
+    if (!currentUser || !activeProjectId) {
+      setTasks([]);
+      return;
+    }
+    setTasksLoading(true);
+    getProjectTasks(currentUser.uid, activeProjectId)
+      .then(setTasks)
+      .catch(console.error)
+      .finally(() => setTasksLoading(false));
+  }, [currentUser, activeProjectId]);
 
   // Fetch user data when currentUser or activeProjectId changes
   useEffect(() => {
@@ -458,6 +490,124 @@ function App() {
     } catch (err) { alert('Erro ao criar projeto.'); }
   };
 
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete) return;
+    try {
+      await deleteProject(projectToDelete.id);
+      setProjects(prev => prev.filter(p => p.id !== projectToDelete.id));
+      if (activeProjectId === projectToDelete.id) setActiveProjectId(null);
+      setProjectToDelete(null);
+    } catch (err) { alert('Erro ao excluir projeto.'); }
+  };
+
+  const handleRenameProject = async () => {
+    if (!projectToRename || !renameProjectValue.trim()) return;
+    try {
+      await updateProject(projectToRename.id, { name: renameProjectValue.trim() });
+      setProjects(prev => prev.map(p => p.id === projectToRename.id ? { ...p, name: renameProjectValue.trim() } : p));
+      setProjectToRename(null);
+      setRenameProjectValue('');
+    } catch (err) { alert('Erro ao renomear projeto.'); }
+  };
+
+  const openTaskModal = (task = null) => {
+    setTaskEditId(task ? task.id : null);
+    setTaskTitleInput(task ? task.title : '');
+    setTaskTypeInput(task?.type || 'tarefa');
+    setTaskMetaValueInput(task?.metaValue != null && task.metaValue > 0 ? formatMoney(task.metaValue) : '');
+    setTaskParcelasInput(task?.parcelas ? String(task.parcelas) : '');
+    setShowTaskModal(true);
+  };
+
+  const closeTaskModal = () => {
+    setShowTaskModal(false);
+    setTaskTitleInput('');
+    setTaskEditId(null);
+    setTaskTypeInput('tarefa');
+    setTaskMetaValueInput('');
+    setTaskParcelasInput('');
+  };
+
+  const openPaymentModal = (task) => {
+    setTaskToPay(task);
+    setPaymentAmountInput('');
+    setShowPaymentModal(true);
+  };
+
+  const handleAddPayment = async () => {
+    const amount = parseMoneyInput(paymentAmountInput);
+    if (!taskToPay || amount <= 0) return;
+    setPaymentSaving(true);
+    try {
+      const currentPaid = Number(taskToPay.paidAmount) || 0;
+      const newPaid = currentPaid + amount;
+      await updateTask(taskToPay.id, { paidAmount: newPaid });
+      setTasks(prev => prev.map(t => t.id === taskToPay.id ? { ...t, paidAmount: newPaid } : t));
+      setShowPaymentModal(false);
+      setTaskToPay(null);
+      setPaymentAmountInput('');
+    } catch (err) {
+      console.error('Erro ao registrar pagamento:', err);
+      alert('Erro ao registrar pagamento.');
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
+  const handleSaveTask = async () => {
+    if (!taskTitleInput.trim() || !currentUser || !activeProjectId) return;
+    const metaValue = parseMoneyInput(taskMetaValueInput);
+    const parcelas = parseInt(taskParcelasInput, 10) || 0;
+    setTaskSaving(true);
+    try {
+      if (taskEditId) {
+        const payload = {
+          title: taskTitleInput.trim(),
+          type: taskTypeInput,
+          metaValue,
+          parcelas
+        };
+        await updateTask(taskEditId, payload);
+        setTasks(prev => prev.map(t => t.id === taskEditId ? { ...t, ...payload } : t));
+      } else {
+        const payload = {
+          title: taskTitleInput.trim(),
+          type: taskTypeInput,
+          metaValue,
+          parcelas,
+          paidAmount: 0
+        };
+        const newTask = await addTask(activeProjectId, payload);
+        try {
+          const updated = await getProjectTasks(currentUser.uid, activeProjectId);
+          setTasks(updated);
+        } catch (_) {
+          setTasks(prev => [newTask, ...prev]);
+        }
+      }
+      closeTaskModal();
+    } catch (err) {
+      console.error('Erro ao salvar tarefa:', err);
+      alert('Erro ao salvar tarefa. Verifique as permissões do Firestore (coleção "tasks").');
+    } finally {
+      setTaskSaving(false);
+    }
+  };
+
+  const handleToggleTaskComplete = async (task) => {
+    try {
+      await updateTask(task.id, { completed: !task.completed });
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: !t.completed } : t));
+    } catch (err) { alert('Erro ao atualizar tarefa.'); }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    try {
+      await deleteTask(taskId);
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (err) { alert('Erro ao excluir tarefa.'); }
+  };
+
   const handleDelete = async (id) => {
      try {
        await deleteTransaction(id);
@@ -521,7 +671,19 @@ function App() {
 
 
   // --------- HELPERS ---------
-  const formatMoney = (val) => val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatMoney = (val) => (typeof val === 'number' ? val : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const parseMoneyInput = (str) => {
+    if (!str || typeof str !== 'string') return 0;
+    const cleaned = str.replace(/\D/g, '');
+    if (cleaned === '') return 0;
+    return parseInt(cleaned, 10) / 100;
+  };
+  const handleTaskMoneyInput = (e, setter) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value === '') { setter(''); return; }
+    const num = parseInt(value, 10) / 100;
+    setter(num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  };
 
   const exportToCSV = () => {
     if (filteredTransactions.length === 0) return;
@@ -1499,6 +1661,9 @@ function App() {
           <a href="#" className={`nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
             <span className="icon">○</span> Orçamentos
           </a>
+          <a href="#" className={`nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
+            <span className="icon">☑</span> Tarefas
+          </a>
         </nav>
         <div style={{ marginTop: 'auto', padding: '20px', textAlign: 'center', fontSize: '10px', color: 'var(--text-tertiary)', opacity: 0.7 }}>
           Desenvolvido por<br/>Lucas Eduardo Moura Santos
@@ -1543,38 +1708,27 @@ function App() {
         <div className="project-tabs">
            <button 
              onClick={() => setActiveProjectId(null)}
-             style={{ 
-               padding: '6px 14px', borderRadius: '20px', border: 'none', 
-               background: activeProjectId === null ? 'var(--primary-color)' : 'transparent', 
-               color: activeProjectId === null ? '#fff' : 'var(--text-secondary)', 
-               cursor: 'pointer', fontWeight: activeProjectId === null ? '600' : 'normal',
-               whiteSpace: 'nowrap', transition: 'all 0.2s'
-             }}
+             className={`project-tab-btn ${activeProjectId === null ? 'active' : ''}`}
            >
              Geral
            </button>
            {projects.map(p => (
-             <button 
-               key={p.id}
-               onClick={() => setActiveProjectId(p.id)}
-               style={{ 
-                 padding: '6px 14px', borderRadius: '20px', border: 'none', 
-                 background: activeProjectId === p.id ? 'var(--primary-color)' : 'transparent', 
-                 color: activeProjectId === p.id ? '#fff' : 'var(--text-secondary)', 
-                 cursor: 'pointer', fontWeight: activeProjectId === p.id ? '600' : 'normal',
-                 whiteSpace: 'nowrap', transition: 'all 0.2s'
-               }}
-             >
-               {p.name}
-             </button>
+             <div key={p.id} className={`project-tab-wrap ${activeProjectId === p.id ? 'active' : ''}`}>
+               <button 
+                 onClick={() => setActiveProjectId(p.id)}
+                 className={`project-tab-btn ${activeProjectId === p.id ? 'active' : ''}`}
+               >
+                 {p.name}
+               </button>
+               <div className="project-tab-actions">
+                 <button type="button" className="project-tab-icon" onClick={(e) => { e.stopPropagation(); setProjectToRename({ id: p.id, name: p.name }); setRenameProjectValue(p.name); }} title="Renomear">✎</button>
+                 <button type="button" className="project-tab-icon project-tab-icon-danger" onClick={(e) => { e.stopPropagation(); setProjectToDelete({ id: p.id, name: p.name }); }} title="Excluir">✕</button>
+               </div>
+             </div>
            ))}
            <button 
              onClick={() => setShowProjectModal(true)} 
-             style={{ 
-               padding: '6px 14px', borderRadius: '20px', border: '1px dashed var(--border-color)', 
-               background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer', 
-               whiteSpace: 'nowrap', transition: 'all 0.2s'
-             }}
+             className="project-tab-add"
            >
              + Novo Projeto
            </button>
@@ -1984,6 +2138,79 @@ function App() {
              </div>
            </main>
         )}
+
+        {currentView === 'tarefas' && (
+          <main className="main-content">
+            <div className="card list-section">
+              <div className="list-header">
+                <h2>Tarefas pendentes</h2>
+                {activeProjectId ? (
+                  <button type="button" className="submit-btn" onClick={() => openTaskModal()} style={{ padding: '8px 16px', fontSize: 13 }}>
+                    + Nova tarefa
+                  </button>
+                ) : null}
+              </div>
+              {!activeProjectId ? (
+                <p className="tasks-empty-hint">Selecione um projeto nas abas acima para gerenciar as tarefas desse projeto.</p>
+              ) : tasksLoading ? (
+                <p className="tasks-empty-hint">Carregando tarefas...</p>
+              ) : tasks.length === 0 ? (
+                <p className="tasks-empty-hint">Nenhuma tarefa ainda. Clique em &quot;+ Nova tarefa&quot; para adicionar.</p>
+              ) : (
+                <ul className="tasks-list">
+                  {tasks.map(task => {
+                    const meta = Number(task.metaValue) || 0;
+                    const paid = Number(task.paidAmount) || 0;
+                    const isDespesa = task.type === 'despesa';
+                    const progressPct = meta > 0
+                      ? (isDespesa ? Math.min(100, (paid / meta) * 100) : (task.completed ? 100 : Math.min(100, (paid / meta) * 100)))
+                      : (task.completed ? 100 : 0);
+                    return (
+                      <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''} ${isDespesa ? 'task-despesa' : ''}`}>
+                        <label className="task-check-wrap">
+                          <input
+                            type="checkbox"
+                            checked={!!task.completed}
+                            onChange={() => handleToggleTaskComplete(task)}
+                          />
+                          <span className="task-check-custom" />
+                        </label>
+                        <div className="task-body">
+                          <div className="task-row">
+                            <span className="task-title">{task.title}</span>
+                            {task.parcelas > 0 && <span className="task-parcelas">{task.parcelas}x</span>}
+                            <div className="task-actions">
+                              {isDespesa && meta > 0 && (
+                                <button type="button" className="task-btn-pay" onClick={() => openPaymentModal(task)} title="Registrar pagamento">+ Abater</button>
+                              )}
+                              <button type="button" className="task-btn-edit" onClick={() => openTaskModal(task)} title="Editar">✎</button>
+                              <button type="button" className="task-btn-delete" onClick={() => handleDeleteTask(task.id)} title="Excluir">✕</button>
+                            </div>
+                          </div>
+                          {(meta > 0 || isDespesa) && (
+                            <div className="task-progress-wrap">
+                              <div className="task-meta-info">
+                                {isDespesa && meta > 0 && (
+                                  <span className="task-meta-text">R$ {formatMoney(paid)} de R$ {formatMoney(meta)}</span>
+                                )}
+                                {task.parcelas > 0 && meta > 0 && (
+                                  <span className="task-meta-parcela">Valor parcela: R$ {formatMoney(meta / task.parcelas)}</span>
+                                )}
+                              </div>
+                              <div className="progress-bg task-progress-bg">
+                                <div className="progress-fill task-progress-fill" style={{ width: `${progressPct}%` }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </main>
+        )}
       </div>
 
       {!chatOpen && (
@@ -2136,6 +2363,144 @@ function App() {
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setShowProjectModal(false)}>Cancelar</button>
               <button className="submit-btn" onClick={handleCreateProject}>Criar Projeto</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMAÇÃO EXCLUSÃO PROJETO */}
+      {projectToDelete && (
+        <div className="modal-overlay" onClick={() => setProjectToDelete(null)}>
+          <div className="modal-content modal-confirm" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Excluir projeto</h2>
+              <button className="close-btn" onClick={() => setProjectToDelete(null)}>✕</button>
+            </div>
+            <p className="modal-subtitle">Tem certeza que deseja excluir o projeto &quot;{projectToDelete.name}&quot;? Esta ação não pode ser desfeita.</p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setProjectToDelete(null)}>Cancelar</button>
+              <button className="submit-btn" style={{ background: 'var(--danger-color)' }} onClick={handleConfirmDeleteProject}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RENOMEAR PROJETO */}
+      {projectToRename && (
+        <div className="modal-overlay" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Renomear projeto</h2>
+              <button className="close-btn" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Nome do projeto</label>
+              <input
+                type="text"
+                value={renameProjectValue}
+                onChange={e => setRenameProjectValue(e.target.value)}
+                placeholder="Novo nome..."
+                autoFocus
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>Cancelar</button>
+              <button className="submit-btn" onClick={handleRenameProject} disabled={!renameProjectValue.trim()}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TAREFA (adicionar / editar) */}
+      {showTaskModal && (
+        <div className="modal-overlay" onClick={closeTaskModal}>
+          <div className="modal-content modal-task" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>{taskEditId ? 'Editar tarefa' : 'Nova tarefa'}</h2>
+              <button className="close-btn" onClick={closeTaskModal}>✕</button>
+            </div>
+            <div className="form-group">
+              <label>Descrição da tarefa</label>
+              <input
+                type="text"
+                value={taskTitleInput}
+                onChange={e => setTaskTitleInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTask(); } }}
+                placeholder="Ex: Conta de luz, Empréstimo"
+                autoFocus
+              />
+            </div>
+            <div className="form-group">
+              <label>Tipo</label>
+              <select value={taskTypeInput} onChange={e => setTaskTypeInput(e.target.value)}>
+                <option value="tarefa">Tarefa</option>
+                <option value="despesa">Despesa / Dívida</option>
+              </select>
+            </div>
+            {taskTypeInput === 'despesa' && (
+              <>
+                <div className="form-group">
+                  <label>Valor meta (R$)</label>
+                  <input
+                    type="text"
+                    value={taskMetaValueInput}
+                    onChange={e => handleTaskMoneyInput(e, setTaskMetaValueInput)}
+                    placeholder="0,00"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Número de parcelas (opcional)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={taskParcelasInput}
+                    onChange={e => setTaskParcelasInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    placeholder="Ex: 12"
+                  />
+                </div>
+              </>
+            )}
+            {taskTypeInput === 'tarefa' && (
+              <div className="form-group">
+                <label>Valor meta (R$), opcional</label>
+                <input
+                  type="text"
+                  value={taskMetaValueInput}
+                  onChange={e => handleTaskMoneyInput(e, setTaskMetaValueInput)}
+                  placeholder="0,00"
+                />
+              </div>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={closeTaskModal}>Cancelar</button>
+              <button type="button" className="submit-btn" onClick={handleSaveTask} disabled={taskSaving || !taskTitleInput.trim()}>{taskSaving ? '...' : (taskEditId ? 'Salvar' : 'Adicionar')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL REGISTRAR PAGAMENTO (abater dívida) */}
+      {showPaymentModal && taskToPay && (
+        <div className="modal-overlay" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Registrar pagamento</h2>
+              <button className="close-btn" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); }}>✕</button>
+            </div>
+            <p className="modal-subtitle">Abater valor em &quot;{taskToPay.title}&quot;. Valor pago até agora: R$ {formatMoney(Number(taskToPay.paidAmount) || 0)} de R$ {formatMoney(Number(taskToPay.metaValue) || 0)}.</p>
+            <div className="form-group">
+              <label>Valor a abater (R$)</label>
+              <input
+                type="text"
+                value={paymentAmountInput}
+                onChange={e => handleTaskMoneyInput(e, setPaymentAmountInput)}
+                placeholder="0,00"
+                autoFocus
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); }}>Cancelar</button>
+              <button type="button" className="submit-btn" onClick={handleAddPayment} disabled={paymentSaving || parseMoneyInput(paymentAmountInput) <= 0}>{paymentSaving ? '...' : 'Registrar'}</button>
             </div>
           </div>
         </div>
