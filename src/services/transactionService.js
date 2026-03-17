@@ -77,6 +77,21 @@ export const getUserTransactions = async (userId, projectId = null) => {
   }
 };
 
+/** All transactions in a project (for shared projects). Caller must be project member. */
+export const getProjectTransactions = async (projectId) => {
+  try {
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where("projectId", "==", projectId)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (error) {
+    console.error("Error fetching project transactions:", error);
+    throw error;
+  }
+};
+
 export const deleteTransaction = async (id) => {
   try {
     await deleteDoc(doc(db, COLLECTION_NAME, id));

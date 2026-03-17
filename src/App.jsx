@@ -9,12 +9,14 @@ import './App.css';
 import { auth } from './config/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
-import { addTransaction, getUserTransactions, deleteTransaction } from './services/transactionService';
+import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
-import { getUserProjects, createProject, deleteProject, updateProject } from './services/projectService';
+import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
 import { getProjectTasks, addTask, updateTask, deleteTask } from './services/taskService';
+import { createInvite, getInvitesByEmail, acceptInvite, rejectInvite } from './services/inviteService';
+import { getNotifications, markNotificationRead } from './services/notificationService';
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -158,9 +160,18 @@ function App() {
   const [taskParcelasInput, setTaskParcelasInput] = useState(''); // número de parcelas
   const [taskSaving, setTaskSaving] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [taskToPay, setTaskToPay] = useState(null); // task para abater
+  const [taskToPay, setTaskToPay] = useState(null);
   const [paymentAmountInput, setPaymentAmountInput] = useState('');
   const [paymentSaving, setPaymentSaving] = useState(false);
+
+  // Notifications & invites
+  const [notifications, setNotifications] = useState([]);
+  const [invites, setInvites] = useState([]);
+  const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
+  const [inviteModalProject, setInviteModalProject] = useState(null); // { id, name }
+  const [inviteEmailInput, setInviteEmailInput] = useState('');
+  const [inviteRoleInput, setInviteRoleInput] = useState('view');
+  const [inviteSending, setInviteSending] = useState(false);
 
 
   // --------- EFFECTS ---------
@@ -259,6 +270,16 @@ function App() {
     }
   }, [currentUser]);
 
+  // Fetch invites and notifications
+  useEffect(() => {
+    if (!currentUser) return;
+    const email = (currentUser.email || '').trim().toLowerCase();
+    if (email) {
+      getInvitesByEmail(email).then(setInvites).catch(console.error);
+    }
+    getNotifications(currentUser.uid).then(setNotifications).catch(console.error);
+  }, [currentUser]);
+
   // Fetch tasks for active project
   useEffect(() => {
     if (!currentUser || !activeProjectId) {
@@ -272,22 +293,29 @@ function App() {
       .finally(() => setTasksLoading(false));
   }, [currentUser, activeProjectId]);
 
-  // Fetch user data when currentUser or activeProjectId changes
+  // Fetch user data when currentUser or activeProjectId or projects changes
   useEffect(() => {
     const fetchData = async () => {
        if (!currentUser) return;
        setDataLoading(true);
        try {
-         const txs = await getUserTransactions(currentUser.uid, activeProjectId);
+         let txs;
+         let budgetOwnerId = currentUser.uid;
+         if (activeProjectId) {
+           const activeProject = projects.find(p => p.id === activeProjectId);
+           if (activeProject) budgetOwnerId = activeProject.userId;
+           txs = await getProjectTransactions(activeProjectId);
+         } else {
+           txs = await getUserTransactions(currentUser.uid, null);
+         }
          setTransactions(txs);
-         
-         const userBudgets = await getUserBudgets(currentUser.uid, activeProjectId);
+
+         const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
          setBudgets(userBudgets);
 
-         // Load custom categories (categories are global, not per project)
          const cats = await getUserCategories(currentUser.uid);
          setCustomCategories(cats);
-         
+
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
             setUsers(allU);
@@ -299,7 +327,7 @@ function App() {
        }
     };
     fetchData();
-  }, [currentUser, activeProjectId]);
+  }, [currentUser, activeProjectId, projects]);
 
   // RECURRING TRANSACTIONS EFFECT: Runs once on login to process recurrences
   useEffect(() => {
@@ -608,6 +636,45 @@ function App() {
     } catch (err) { alert('Erro ao excluir tarefa.'); }
   };
 
+  const handleSendInvite = async () => {
+    if (!inviteModalProject || !inviteEmailInput.trim()) return;
+    setInviteSending(true);
+    try {
+      await createInvite(inviteModalProject.id, inviteModalProject.name, inviteEmailInput.trim(), inviteRoleInput);
+      setInviteModalProject(null);
+      setInviteEmailInput('');
+      setInviteRoleInput('view');
+      alert('Convite enviado. O usuário verá na aba de notificações quando fizer login.');
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Erro ao enviar convite.');
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const handleAcceptInvite = async (invite) => {
+    try {
+      await acceptInvite(invite.id);
+      const list = await getUserProjects(currentUser.uid);
+      setProjects(list);
+      setInvites(prev => prev.filter(i => i.id !== invite.id));
+      setShowNotificationsPanel(false);
+      setActiveProjectId(invite.projectId);
+    } catch (err) {
+      alert(err.message || 'Erro ao aceitar convite.');
+    }
+  };
+
+  const handleRejectInvite = async (inviteId) => {
+    try {
+      await rejectInvite(inviteId);
+      setInvites(prev => prev.filter(i => i.id !== inviteId));
+    } catch (err) {
+      alert(err.message || 'Erro ao rejeitar.');
+    }
+  };
+
   const handleDelete = async (id) => {
      try {
        await deleteTransaction(id);
@@ -618,9 +685,16 @@ function App() {
 
   // --------- DATA CALCULATIONS (Memoized) ---------
   
-  const userTransactions = useMemo(() => {
-    return transactions.filter(t => t.userId === currentUser?.uid);
-  }, [transactions, currentUser]);
+  const userTransactions = useMemo(() => transactions, [transactions]);
+
+  const activeProjectRole = useMemo(() => {
+    if (!activeProjectId) return 'owner';
+    const p = projects.find(x => x.id === activeProjectId);
+    return getProjectRole(p, currentUser?.uid) || null;
+  }, [projects, activeProjectId, currentUser?.uid]);
+
+  const canAddToProject = !activeProjectId || activeProjectRole === 'owner' || activeProjectRole === 'add' || activeProjectRole === 'manage';
+  const canDeleteInProject = !activeProjectId || activeProjectRole === 'owner' || activeProjectRole === 'manage';
 
   const filteredTransactions = useMemo(() => {
     return userTransactions.filter(t => {
@@ -796,7 +870,9 @@ function App() {
     else newBudgets[activeBudgetCat] = finalVal;
 
     try {
-       await saveUserBudgets(newBudgets, activeProjectId);
+       const activeProject = projects.find(p => p.id === activeProjectId);
+       const budgetOwnerId = activeProject?.userId ?? currentUser?.uid;
+       await saveUserBudgets(newBudgets, activeProjectId, budgetOwnerId);
        setBudgets(newBudgets);
        setBudgetModalOpen(false);
     } catch(err) { alert('Erro ao salvar orçamento.')}
@@ -1679,8 +1755,39 @@ function App() {
               <h3>{currentUser.username || currentUser.displayName || currentUser.email}</h3>
               <span>{new Date(selectedYear, selectedMonth-1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}</span>
             </div>
+            <div className="notifications-wrap">
+              <button type="button" className="notifications-btn" onClick={() => setShowNotificationsPanel(prev => !prev)} title="Notificações">
+                🔔
+                {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
+              </button>
+              {showNotificationsPanel && (
+                <div className="notifications-dropdown">
+                  <div className="notifications-dropdown-header">Notificações</div>
+                  {invites.length === 0 && notifications.length === 0 && (
+                    <div className="notifications-empty">Nenhuma notificação.</div>
+                  )}
+                  {invites.map(inv => (
+                    <div key={inv.id} className="notification-item notification-invite">
+                      <div className="notification-invite-text">
+                        Convite para o projeto <strong>{inv.projectName}</strong> com acesso <strong>{inv.role === 'view' ? 'somente leitura' : inv.role === 'add' ? 'ver e incluir' : 'ver, incluir e excluir'}</strong>.
+                      </div>
+                      <div className="notification-invite-actions">
+                        <button type="button" className="btn-confirm" onClick={() => handleAcceptInvite(inv)}>Aceitar</button>
+                        <button type="button" className="btn-cancel" onClick={() => handleRejectInvite(inv.id)}>Recusar</button>
+                      </div>
+                    </div>
+                  ))}
+                  {notifications.filter(n => !n.read).map(n => (
+                    <div key={n.id} className="notification-item">
+                      <span>{n.type === 'invite' ? 'Convite' : n.type}</span>
+                      <button type="button" className="text-btn" onClick={() => markNotificationRead(n.id).then(() => setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x)))}>Marcar lida</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-          
+
           <div className="top-actions">
             <div className="period-filter">
                <select className="month-select" value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))}>
@@ -1712,20 +1819,28 @@ function App() {
            >
              Geral
            </button>
-           {projects.map(p => (
-             <div key={p.id} className={`project-tab-wrap ${activeProjectId === p.id ? 'active' : ''}`}>
-               <button 
-                 onClick={() => setActiveProjectId(p.id)}
-                 className={`project-tab-btn ${activeProjectId === p.id ? 'active' : ''}`}
-               >
-                 {p.name}
-               </button>
-               <div className="project-tab-actions">
-                 <button type="button" className="project-tab-icon" onClick={(e) => { e.stopPropagation(); setProjectToRename({ id: p.id, name: p.name }); setRenameProjectValue(p.name); }} title="Renomear">✎</button>
-                 <button type="button" className="project-tab-icon project-tab-icon-danger" onClick={(e) => { e.stopPropagation(); setProjectToDelete({ id: p.id, name: p.name }); }} title="Excluir">✕</button>
+           {projects.map(p => {
+             const role = getProjectRole(p, currentUser?.uid);
+             const isOwner = role === 'owner';
+             return (
+               <div key={p.id} className={`project-tab-wrap ${activeProjectId === p.id ? 'active' : ''}`}>
+                 <button 
+                   onClick={() => setActiveProjectId(p.id)}
+                   className={`project-tab-btn ${activeProjectId === p.id ? 'active' : ''}`}
+                 >
+                   {p.name}
+                   {p.isShared && <span className="project-tab-shared" title="Projeto compartilhado">👤</span>}
+                 </button>
+                 {isOwner && (
+                   <div className="project-tab-actions">
+                     <button type="button" className="project-tab-icon" onClick={(e) => { e.stopPropagation(); setInviteModalProject({ id: p.id, name: p.name }); setInviteEmailInput(''); setInviteRoleInput('view'); }} title="Convidar">⊕</button>
+                     <button type="button" className="project-tab-icon" onClick={(e) => { e.stopPropagation(); setProjectToRename({ id: p.id, name: p.name }); setRenameProjectValue(p.name); }} title="Renomear">✎</button>
+                     <button type="button" className="project-tab-icon project-tab-icon-danger" onClick={(e) => { e.stopPropagation(); setProjectToDelete({ id: p.id, name: p.name }); }} title="Excluir">✕</button>
+                   </div>
+                 )}
                </div>
-             </div>
-           ))}
+             );
+           })}
            <button 
              onClick={() => setShowProjectModal(true)} 
              className="project-tab-add"
@@ -1826,6 +1941,7 @@ function App() {
                 </div>
               </section>
 
+              {canAddToProject && (
               <section className="card form-section">
                 <form onSubmit={handleAddTransaction} className="transaction-form">
                   <div className="form-group">
@@ -1919,6 +2035,7 @@ function App() {
                   </div>
                 ) : null}
               </section>
+              )}
 
               <section className="card list-section">
                 <div className="list-header">
@@ -1947,7 +2064,7 @@ function App() {
                         <div className={`t-amount ${t.type}`}>
                           <span>{t.type === 'expense' ? '− ' : '+ '}</span><span>R$ {formatMoney(t.amount)}</span>
                         </div>
-                        <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>
+                        {canDeleteInProject && <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>}
                       </div>
                     ))
                   )}
@@ -2144,7 +2261,7 @@ function App() {
             <div className="card list-section">
               <div className="list-header">
                 <h2>Tarefas pendentes</h2>
-                {activeProjectId ? (
+                {activeProjectId && canAddToProject ? (
                   <button type="button" className="submit-btn" onClick={() => openTaskModal()} style={{ padding: '8px 16px', fontSize: 13 }}>
                     + Nova tarefa
                   </button>
@@ -2180,11 +2297,11 @@ function App() {
                             <span className="task-title">{task.title}</span>
                             {task.parcelas > 0 && <span className="task-parcelas">{task.parcelas}x</span>}
                             <div className="task-actions">
-                              {isDespesa && meta > 0 && (
+                              {canAddToProject && isDespesa && meta > 0 && (
                                 <button type="button" className="task-btn-pay" onClick={() => openPaymentModal(task)} title="Registrar pagamento">+ Abater</button>
                               )}
-                              <button type="button" className="task-btn-edit" onClick={() => openTaskModal(task)} title="Editar">✎</button>
-                              <button type="button" className="task-btn-delete" onClick={() => handleDeleteTask(task.id)} title="Excluir">✕</button>
+                              {canAddToProject && <button type="button" className="task-btn-edit" onClick={() => openTaskModal(task)} title="Editar">✎</button>}
+                              {canDeleteInProject && <button type="button" className="task-btn-delete" onClick={() => handleDeleteTask(task.id)} title="Excluir">✕</button>}
                             </div>
                           </div>
                           {(meta > 0 || isDespesa) && (
@@ -2363,6 +2480,35 @@ function App() {
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setShowProjectModal(false)}>Cancelar</button>
               <button className="submit-btn" onClick={handleCreateProject}>Criar Projeto</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CONVIDAR PARA PROJETO */}
+      {inviteModalProject && (
+        <div className="modal-overlay" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Convidar para &quot;{inviteModalProject.name}&quot;</h2>
+              <button className="close-btn" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>✕</button>
+            </div>
+            <p className="modal-subtitle">O convidado receberá o convite ao fazer login (e-mail usado no cadastro).</p>
+            <div className="form-group">
+              <label>E-mail do usuário</label>
+              <input type="email" value={inviteEmailInput} onChange={e => setInviteEmailInput(e.target.value)} placeholder="email@exemplo.com" autoFocus />
+            </div>
+            <div className="form-group">
+              <label>Nível de acesso</label>
+              <select value={inviteRoleInput} onChange={e => setInviteRoleInput(e.target.value)}>
+                <option value="view">Apenas ver</option>
+                <option value="add">Ver e incluir registros</option>
+                <option value="manage">Ver, incluir e excluir registros</option>
+              </select>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>Cancelar</button>
+              <button type="button" className="submit-btn" onClick={handleSendInvite} disabled={inviteSending || !inviteEmailInput.trim()}>{inviteSending ? 'Enviando...' : 'Enviar convite'}</button>
             </div>
           </div>
         </div>

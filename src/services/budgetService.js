@@ -6,17 +6,17 @@ import {
   getDoc 
 } from 'firebase/firestore';
 
-export const saveUserBudgets = async (budgetsData, projectId = null) => {
+export const saveUserBudgets = async (budgetsData, projectId = null, ownerId = null) => {
   try {
     const user = auth.currentUser;
     if (!user) throw new Error("No authenticated user");
 
     // We will save user budgets as a single document under 'budgets' collection with the ID = user.uid + _ + projectId
-    // If it's the general budget, just use user.uid
-    const docId = projectId ? `${user.uid}_${projectId}` : user.uid;
-    
-    await setDoc(doc(db, 'budgets', docId), budgetsData);
-    
+    // If it's the general budget, just use user.uid. Store projectId/ownerId for shared-project rules.
+    const uid = ownerId || user.uid;
+    const docId = projectId ? `${uid}_${projectId}` : uid;
+    const payload = { ...budgetsData, ownerId: uid, projectId: projectId || null };
+    await setDoc(doc(db, 'budgets', docId), payload);
     return budgetsData;
   } catch (error) {
     console.error("Error saving budgets:", error);
@@ -31,7 +31,9 @@ export const getUserBudgets = async (userId, projectId = null) => {
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
-      return docSnap.data();
+      const data = docSnap.data();
+      const { ownerId, projectId: _p, ...budgets } = data;
+      return budgets;
     } else {
       return {}; // No budgets defined yet
     }

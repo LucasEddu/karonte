@@ -15,6 +15,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true;
     }
 
+    // projects (owner or in collaborators; compat: docs without collaborators = owner only)
+    function isProjectMember(projectId) {
+      let p = get(/databases/$(database)/documents/projects/$(projectId)).data;
+      return p.userId == request.auth.uid
+        || request.auth.uid in p.get('collaborators', []);
+    }
+
     // users
     match /users/{uid} {
       allow read: if isOwner(uid) && isActiveUser() || isAdmin();
@@ -26,32 +33,64 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // transactions
+    // transactions: own docs OR docs in a project where user is owner/collaborator
     match /transactions/{transactionId} {
-      allow read, write: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && isActiveUser() && request.resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || (resource.data.get('projectId', null) != null && isProjectMember(resource.data.projectId)));
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid
+        && (request.resource.data.get('projectId', null) == null || isProjectMember(request.resource.data.projectId));
+      allow update, delete: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || (resource.data.get('projectId', null) != null && isProjectMember(resource.data.projectId)));
     }
 
-    // budgets
+    // budgets: docId = uid or uid_projectId; allow if owner or project member
     match /budgets/{docId} {
-      allow read, write: if isAuthenticated() && isActiveUser() && docId.matches('^' + request.auth.uid + '.*');
+      allow read, update, delete: if isAuthenticated() && isActiveUser()
+        && (docId.matches('^' + request.auth.uid + '.*')
+            || (resource.data.get('projectId', null) != null && isProjectMember(resource.data.projectId)));
+      allow create: if isAuthenticated() && isActiveUser()
+        && (docId.matches('^' + request.auth.uid + '.*')
+            || (request.resource.data.get('projectId', null) != null && isProjectMember(request.resource.data.projectId)));
     }
 
-    // projects
+    // projects: read/update if owner or in collaborators; delete/create only owner
     match /projects/{projectId} {
-      allow read, update, delete: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
+      allow read: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || request.auth.uid in resource.data.get('collaborators', []));
       allow create: if isAuthenticated() && isActiveUser() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
     }
 
-    // tasks (tarefas por projeto)
+    // tasks: own or project member
     match /tasks/{taskId} {
-      allow read, write: if isAuthenticated()
-        && isActiveUser()
-        && resource.data.userId == request.auth.uid;
+      allow read, write: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || (resource.data.get('projectId', null) != null && isProjectMember(resource.data.projectId)));
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid
+        && (resource.data.get('projectId', null) != null && isProjectMember(request.resource.data.projectId));
+    }
 
-      allow create: if isAuthenticated()
-        && isActiveUser()
-        && request.resource.data.userId == request.auth.uid;
+    // invites: fromUid or toUid can read; only fromUid can update (accept/reject)
+    match /invites/{inviteId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (resource.data.fromUid == request.auth.uid || resource.data.get('toUid', '') == request.auth.uid);
+      allow create: if isAuthenticated() && isActiveUser() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if isAuthenticated() && isActiveUser()
+        && (resource.data.fromUid == request.auth.uid || resource.data.get('toUid', '') == request.auth.uid);
+      allow delete: if isAuthenticated() && isActiveUser() && resource.data.fromUid == request.auth.uid;
+    }
+
+    // notifications: only the recipient (userId) can read/update
+    match /notifications/{notificationId} {
+      allow read, update: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isActiveUser();
+      allow delete: if isAuthenticated() && isActiveUser() && resource.data.userId == request.auth.uid;
     }
 
     // Bloqueia tudo que não foi explicitamente liberado
