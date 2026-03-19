@@ -118,6 +118,8 @@ function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef(null);
+  const hasSpeechSupport = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+
 
   // --------- STATE: DRAGGABLE CHAT FAB ---------
   const [fabPosition, setFabPosition] = useState(() => {
@@ -1404,11 +1406,8 @@ function App() {
   };
 
   const handleVoiceToggle = () => {
+    if (!hasSpeechSupport) return;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Seu navegador não suporta reconhecimento de voz.");
-      return;
-    }
 
     if (isRecording) {
       recognitionRef.current.stop();
@@ -2825,7 +2824,9 @@ function App() {
                    type="button" 
                    className={`chat-voice-btn ${isRecording ? 'recording' : ''}`}
                    onClick={handleVoiceToggle}
-                   title="Comando de Voz"
+                   title={hasSpeechSupport ? "Comando de Voz" : "Seu navegador não suporta reconhecimento de voz da Web API."}
+                   disabled={!hasSpeechSupport}
+                   style={!hasSpeechSupport ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
                   🎙️
                 </button>
