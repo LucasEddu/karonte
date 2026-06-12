@@ -5,7 +5,7 @@ const COLLECTION = 'userCategories';
 
 /**
  * Carrega as categorias personalizadas do usuário.
- * Retorna { expense: string[], income: string[] }
+ * Retorna { expense: string[], income: string[], classifications: Record<string, string> }
  */
 export const getUserCategories = async (uid) => {
   try {
@@ -15,19 +15,20 @@ export const getUserCategories = async (uid) => {
       return {
         expense: data.expense || [],
         income:  data.income  || [],
+        classifications: data.classifications || {},
       };
     }
-    return { expense: [], income: [] };
+    return { expense: [], income: [], classifications: {} };
   } catch (err) {
     console.error('Error fetching user categories:', err);
-    return { expense: [], income: [] };
+    return { expense: [], income: [], classifications: {} };
   }
 };
 
 /**
  * Salva as categorias personalizadas do usuário no Firestore.
  * @param {string} uid
- * @param {{ expense: string[], income: string[] }} categories
+ * @param {{ expense: string[], income: string[], classifications?: Record<string, string> }} categories
  */
 export const saveUserCategories = async (uid, categories) => {
   try {
@@ -37,3 +38,4 @@ export const saveUserCategories = async (uid, categories) => {
     throw err;
   }
 };
+

@@ -1,17 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
-  BarChart, Bar,
-  AreaChart, Area
-} from 'recharts';
 import './App.css';
+import HubView from './components/HubView';
+import TransactionDrawer from './components/TransactionDrawer';
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
+import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
 import { getProjectTasks, addTask, updateTask, deleteTask } from './services/taskService';
@@ -85,12 +82,16 @@ function App() {
   const [type, setType] = useState('expense');
   const [category, setCategory] = useState('');
   const [isRecurring, setIsRecurring] = useState(false);
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installmentTotal, setInstallmentTotal] = useState('2');
+  const [installmentCurrent, setInstallmentCurrent] = useState('1');
 
   // --------- STATE: CUSTOM CATEGORIES ---------
-  const [customCategories, setCustomCategories] = useState({ expense: [], income: [] });
+  const [customCategories, setCustomCategories] = useState({ expense: [], income: [], classifications: {} });
   const [showCatManager, setShowCatManager] = useState(false);
   const [newCatName, setNewCatName]  = useState('');
   const [newCatType, setNewCatType]  = useState('expense');
+  const [newCatClassification, setNewCatClassification] = useState('wants');
   const [catSaving, setCatSaving]    = useState(false);
 
   const DEFAULT_EXPENSE_CATS = ['Moradia', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Outros'];
@@ -100,7 +101,34 @@ function App() {
   const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...customCategories.expense])];
   const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...customCategories.income])];
 
-  const COLORS = ['#1D9E75', '#5DCAA5', '#f87171', '#f59e0b', '#8b5cf6', '#3b82f6'];
+  const chartTheme = useMemo(() => {
+    const root = document.documentElement;
+    const get = (name) => getComputedStyle(root).getPropertyValue(name).trim();
+    return {
+      balance: get('--chart-balance'),
+      income: get('--chart-income'),
+      expense: get('--chart-expense'),
+      tooltipBg: get('--chart-tooltip-bg'),
+      tooltipBorder: get('--chart-tooltip-border'),
+      grid: get('--chart-grid'),
+      labelLine: get('--chart-label-line'),
+      palette: [
+        get('--chart-1'),
+        get('--chart-2'),
+        get('--chart-3'),
+        get('--chart-4'),
+        get('--chart-5'),
+        get('--chart-6'),
+      ],
+    };
+  }, [theme]);
+
+  const chartTooltipStyle = {
+    backgroundColor: chartTheme.tooltipBg,
+    border: `1px solid ${chartTheme.tooltipBorder}`,
+    borderRadius: 8,
+    fontSize: 11,
+  };
 
   // --------- STATE: BUDGETS & GOALS ---------
   const [budgets, setBudgets] = useState({});
@@ -108,8 +136,20 @@ function App() {
   const [activeBudgetCat, setActiveBudgetCat] = useState('');
   const [budgetInputValue, setBudgetInputValue] = useState('');
 
+  // --------- STATE: CREDIT CARDS ---------
+  const [creditCards, setCreditCards] = useState([]);
+  const [newCardName, setNewCardName] = useState('');
+  const [newCardLimit, setNewCardLimit] = useState('');
+  const [newCardClosingDay, setNewCardClosingDay] = useState(5);
+  const [newCardDueDay, setNewCardDueDay] = useState(10);
+  const [cardSavingActive, setCardSavingActive] = useState(false);
+  const [budgetsSubTab, setBudgetsSubTab] = useState('categories'); // 'categories' or 'cards'
+  const [paymentMethod, setPaymentMethod] = useState('avulsa'); // 'avulsa' or 'card'
+  const [selectedCardId, setSelectedCardId] = useState('');
+
   // --------- STATE: UI NAVIGATION & FILTERS ---------
-  const [currentView, setCurrentView] = useState('dashboard');
+  const [currentView, setCurrentView] = useState('hub');
+  const [showTransactionDrawer, setShowTransactionDrawer] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
@@ -182,6 +222,9 @@ function App() {
   const [inviteRoleInput, setInviteRoleInput] = useState('view');
   const [inviteSending, setInviteSending] = useState(false);
 
+  // --------- STATE: DROPDOWNS / MENU POPUPS ---------
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+  const [showProfilePopover, setShowProfilePopover] = useState(false);
 
   // --------- EFFECTS ---------
   useEffect(() => {
@@ -189,6 +232,35 @@ function App() {
     localStorage.setItem('finance_theme', theme);
   }, [theme]);
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+
+  // Handle click outside dropdowns and popovers
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      const selector = document.querySelector('.project-selector-container');
+      const mobileBtn = document.querySelector('.mobile-project-btn');
+      const mobileDropdown = document.querySelector('.project-selector-dropdown.mobile-dropdown');
+      
+      if (showProjectDropdown && 
+          (!selector || !selector.contains(e.target)) && 
+          (!mobileBtn || !mobileBtn.contains(e.target)) &&
+          (!mobileDropdown || !mobileDropdown.contains(e.target))) {
+        setShowProjectDropdown(false);
+      }
+
+      const footer = document.querySelector('.sidebar-footer');
+      const mobileAvatar = document.querySelector('.mobile-profile-avatar');
+      const mobileProfileDropdown = document.querySelector('.profile-popover.mobile-dropdown');
+      if (showProfilePopover && 
+          (!footer || !footer.contains(e.target)) && 
+          (!mobileAvatar || !mobileAvatar.contains(e.target)) &&
+          (!mobileProfileDropdown || !mobileProfileDropdown.contains(e.target))) {
+        setShowProfilePopover(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showProjectDropdown, showProfilePopover]);
 
   // Firebase Auth Observer
   useEffect(() => {
@@ -218,7 +290,8 @@ function App() {
         setAuthLoading(false);
         setTransactions([]);
         setBudgets({});
-        setCustomCategories({ expense: [], income: [] });
+        setCustomCategories({ expense: [], income: [], classifications: {} });
+        setCreditCards([]);
       }
     });
 
@@ -375,6 +448,9 @@ function App() {
 
          const cats = await getUserCategories(currentUser.uid);
          setCustomCategories(cats);
+
+         const cards = await getCreditCards(currentUser.uid, activeProjectId);
+         setCreditCards(cards);
 
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
@@ -545,6 +621,26 @@ function App() {
     const numericAmount = parseFloat(amount.replace(/\./g, '').replace(',', '.'));
     if(isNaN(numericAmount) || numericAmount <= 0) return;
 
+    if (type === 'expense' && paymentMethod === 'card') {
+      if (!selectedCardId) {
+        alert('Por favor, selecione um cartão de crédito.');
+        return;
+      }
+    }
+
+    if (type === 'expense' && isInstallment) {
+      const total = parseInt(installmentTotal, 10) || 0;
+      const current = parseInt(installmentCurrent, 10) || 0;
+      if (total < 2) {
+        alert('Informe pelo menos 2 parcelas.');
+        return;
+      }
+      if (current < 1 || current > total) {
+        alert('A parcela atual deve estar entre 1 e o total de parcelas.');
+        return;
+      }
+    }
+
     const now = new Date();
     const isCurrentPeriod = (selectedMonth === now.getMonth() + 1) && (selectedYear === now.getFullYear());
     
@@ -559,12 +655,33 @@ function App() {
       date: dateObj.toISOString(), 
       displayDate: dateObj.toLocaleDateString('pt-BR')
     };
+
+    if (type === 'expense') {
+      newTransaction.paymentMethod = paymentMethod;
+      if (paymentMethod === 'card') {
+        newTransaction.cardId = selectedCardId;
+      }
+      if (isInstallment) {
+        newTransaction.isInstallment = true;
+        newTransaction.installments = parseInt(installmentTotal, 10);
+        newTransaction.installmentNumber = parseInt(installmentCurrent, 10);
+      }
+    }
     
     try {
       const createdByName = currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
       setTransactions([savedDoc, ...transactions]);
-      setDescription(''); setAmount(''); setCategory(''); setIsRecurring(false);
+      setDescription(''); 
+      setAmount(''); 
+      setCategory(''); 
+      setIsRecurring(false);
+      setIsInstallment(false);
+      setInstallmentTotal('2');
+      setInstallmentCurrent('1');
+      setPaymentMethod('avulsa');
+      setSelectedCardId('');
+      setShowTransactionDrawer(false);
     } catch(err) { 
       console.error('Erro ao salvar transação:', err);
       alert('Erro ao salvar transação.'); 
@@ -847,8 +964,92 @@ function App() {
     return data;
   }, [userTransactions]);
 
+  const totalBudgetLimit = useMemo(() => {
+    return Object.values(budgets).reduce((sum, val) => sum + (Number(val) || 0), 0);
+  }, [budgets]);
+
+  const budgetStats = useMemo(() => {
+    const expenses = filteredTransactions.filter(t => t.type === 'expense');
+    return expenseCategories.map(cat => {
+      const limit = budgets[cat] || 0;
+      const spent = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
+      const percent = limit > 0 ? (spent / limit) * 100 : 0;
+      return { name: cat, spent, limit, percent };
+    }).filter(item => item.limit > 0).sort((a,b) => b.spent - a.spent);
+  }, [filteredTransactions, budgets, expenseCategories]);
+
+  const ruleStats = useMemo(() => {
+    const expenses = filteredTransactions.filter(t => t.type === 'expense');
+    
+    const DEFAULT_CLASSIFICATIONS = {
+      'Moradia': 'needs',
+      'Alimentação': 'needs',
+      'Transporte': 'needs',
+      'Saúde': 'needs',
+      'Lazer': 'wants',
+      'Outros': 'wants'
+    };
+
+    let needsSpent = 0;
+    let wantsSpent = 0;
+    let savingsSpent = 0;
+
+    expenses.forEach(t => {
+      const cls = (customCategories.classifications && customCategories.classifications[t.category]) || DEFAULT_CLASSIFICATIONS[t.category] || 'wants';
+      if (cls === 'needs') {
+        needsSpent += t.amount;
+      } else if (cls === 'savings') {
+        savingsSpent += t.amount;
+      } else {
+        wantsSpent += t.amount;
+      }
+    });
+
+    const savingsAmount = (balance > 0 ? balance : 0) + savingsSpent;
+    const total = needsSpent + wantsSpent + savingsAmount;
+    if (total === 0) return { needsPct: 0, wantsPct: 0, savingsPct: 0, needsSpent: 0, wantsSpent: 0, savingsAmount: 0 };
+    
+    return {
+      needsPct: (needsSpent / total) * 100,
+      wantsPct: (wantsSpent / total) * 100,
+      savingsPct: (savingsAmount / total) * 100,
+      needsSpent,
+      wantsSpent,
+      savingsAmount
+    };
+  }, [filteredTransactions, balance, customCategories.classifications]);
+
 
   // --------- HELPERS ---------
+  const getCardInvoiceStats = (card, transactionsList) => {
+    const limit = Number(card.limit) || 0;
+    const closingDay = Number(card.closingDay) || 5;
+    
+    // Calculate cycle boundaries for selectedMonth/selectedYear
+    const closingDate = new Date(selectedYear, selectedMonth - 1, closingDay, 23, 59, 59);
+    const prevClosingDate = new Date(selectedYear, selectedMonth - 2, closingDay, 23, 59, 59);
+    
+    const cardExpenses = transactionsList.filter(t => 
+      t.type === 'expense' && 
+      t.paymentMethod === 'card' && 
+      t.cardId === card.id
+    );
+    
+    const invoiceAmount = cardExpenses.filter(t => {
+      const tDate = new Date(t.date);
+      return tDate > prevClosingDate && tDate <= closingDate;
+    }).reduce((sum, t) => sum + t.amount, 0);
+    
+    const availableLimit = limit - invoiceAmount;
+    const percentUsed = limit > 0 ? (invoiceAmount / limit) * 100 : 0;
+    
+    return {
+      invoiceAmount,
+      availableLimit,
+      percentUsed
+    };
+  };
+
   const formatMoney = (val) => (typeof val === 'number' ? val : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const parseMoneyInput = (str) => {
     if (!str || typeof str !== 'string') return 0;
@@ -885,7 +1086,7 @@ function App() {
     if (catName === 'Moradia') return 'var(--cat-moradia-fill)';
     if (catName === 'Alimentação') return 'var(--cat-alimentacao-fill)';
     if (catName === 'Lazer') return 'var(--cat-lazer-fill)';
-    return COLORS[index % COLORS.length];
+    return chartTheme.palette[index % chartTheme.palette.length];
   };
 
   const getCatTrack = (catName) => {
@@ -1045,13 +1246,22 @@ function App() {
       alert('Esta categoria já existe.');
       return;
     }
-    const updated = { expense: [...customCategories.expense], income: [...customCategories.income] };
-    updated[newCatType].push(name.charAt(0).toUpperCase() + name.slice(1));
+    const updated = {
+      expense: [...customCategories.expense],
+      income: [...customCategories.income],
+      classifications: { ...customCategories.classifications }
+    };
+    const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
+    updated[newCatType].push(formattedName);
+    if (newCatType === 'expense') {
+      updated.classifications[formattedName] = newCatClassification;
+    }
     setCatSaving(true);
     try {
       await saveUserCategories(currentUser.uid, updated);
       setCustomCategories(updated);
       setNewCatName('');
+      setShowCatManager(false);
     } catch (err) {
       alert('Erro ao salvar categoria.');
     } finally {
@@ -1061,9 +1271,12 @@ function App() {
 
   const handleRemoveCustomCategory = async (catName) => {
     if (!currentUser) return;
+    const updatedClassifications = { ...customCategories.classifications };
+    delete updatedClassifications[catName];
     const updated = {
       expense: customCategories.expense.filter(c => c !== catName),
       income:  customCategories.income.filter(c  => c !== catName),
+      classifications: updatedClassifications
     };
     if (category === catName) setCategory('');
     try {
@@ -1071,6 +1284,61 @@ function App() {
       setCustomCategories(updated);
     } catch(err) {
       alert('Erro ao remover categoria.');
+    }
+  };
+
+  // --------- CREDIT CARDS HANDLERS ---------
+  const handleCreateCreditCard = async (e) => {
+    e.preventDefault();
+    const name = newCardName.trim();
+    if (!name || !currentUser) return;
+    
+    const limitNum = parseFloat(newCardLimit.replace(/\./g, '').replace(',', '.'));
+    if (isNaN(limitNum) || limitNum <= 0) {
+      alert('Por favor, insira um limite válido maior que zero.');
+      return;
+    }
+
+    const closingDayNum = parseInt(newCardClosingDay, 10);
+    const dueDayNum = parseInt(newCardDueDay, 10);
+    if (closingDayNum < 1 || closingDayNum > 31 || dueDayNum < 1 || dueDayNum > 31) {
+      alert('Dias de fechamento e vencimento devem ser entre 1 e 31.');
+      return;
+    }
+
+    setCardSavingActive(true);
+    try {
+      const savedCard = await addCreditCard({
+        name,
+        limit: limitNum,
+        closingDay: closingDayNum,
+        dueDay: dueDayNum
+      }, activeProjectId);
+      setCreditCards([...creditCards, savedCard]);
+      setNewCardName('');
+      setNewCardLimit('');
+      setNewCardClosingDay(5);
+      setNewCardDueDay(10);
+    } catch (err) {
+      console.error('Erro ao salvar cartão:', err);
+      alert('Erro ao cadastrar cartão de crédito.');
+    } finally {
+      setCardSavingActive(false);
+    }
+  };
+
+  const handleDeleteCreditCard = async (cardId) => {
+    if (!currentUser) return;
+    if (!window.confirm('Tem certeza de que deseja remover este cartão? As despesas associadas a ele continuarão existindo, mas perderão a associação com o cartão.')) {
+      return;
+    }
+    try {
+      await deleteCreditCard(cardId);
+      setCreditCards(creditCards.filter(c => c.id !== cardId));
+      if (selectedCardId === cardId) setSelectedCardId('');
+    } catch (err) {
+      console.error('Erro ao deletar cartão:', err);
+      alert('Erro ao excluir cartão de crédito.');
     }
   };
 
@@ -1819,23 +2087,256 @@ function App() {
   return (
     <div className="app-layout">
       
-      {/* SIDEBAR NAVIGATION */}
+      {/* MOBILE HEADER */}
+      <header className="mobile-header">
+        <button 
+          type="button" 
+          className="mobile-project-btn"
+          onClick={() => setShowProjectDropdown(prev => !prev)}
+        >
+          <span className="mobile-project-avatar">
+            {activeProjectId === null ? 'G' : (projects.find(p => p.id === activeProjectId)?.name || '?').charAt(0).toUpperCase()}
+          </span>
+          <span className="mobile-project-name">
+            {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
+          </span>
+          <span className="mobile-project-arrow">▾</span>
+        </button>
+
+        <div className="mobile-header-actions">
+          {/* Notifications in Mobile Header */}
+          <div className="notifications-wrap">
+            <button
+              type="button"
+              className="notifications-btn"
+              onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
+              title="Notificações"
+            >
+              🔔
+              {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
+            </button>
+            {showNotificationsPanel && (
+              <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
+                <div className="notifications-dropdown-header">Notificações</div>
+                {invites.length === 0 && notifications.length === 0 && (
+                  <div className="notifications-empty">Nenhuma notificação.</div>
+                )}
+                {invites.map(inv => (
+                  <div key={inv.id} className="notification-item notification-invite">
+                    <div className="notification-invite-text">
+                      Convite para o projeto <strong>{inv.projectName}</strong> com acesso <strong>{inv.role === 'view' ? 'somente leitura' : inv.role === 'add' ? 'ver e incluir' : 'ver, incluir e excluir'}</strong>.
+                    </div>
+                    <div className="notification-invite-actions">
+                      <button type="button" className="btn-confirm" onClick={() => handleAcceptInvite(inv)}>Aceitar</button>
+                      <button type="button" className="btn-cancel" onClick={() => handleRejectInvite(inv.id)}>Recusar</button>
+                    </div>
+                  </div>
+                ))}
+                {notifications.filter(n => !n.read).map(n => (
+                  <div key={n.id} className="notification-item">
+                    <span>{n.type === 'invite' ? 'Convite' : n.type}</span>
+                    <button type="button" className="text-btn" onClick={() => markNotificationRead(n.id).then(() => setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x)))}>Marcar lida</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Profile in Mobile Header */}
+          <button 
+            type="button" 
+            className="mobile-profile-avatar"
+            onClick={() => setShowProfilePopover(prev => !prev)}
+          >
+            {(currentUser.username || currentUser.displayName || currentUser.email || '?').charAt(0).toUpperCase()}
+          </button>
+        </div>
+
+        {/* Floating dropdowns rendered relative to mobile view screen */}
+        {showProjectDropdown && (
+          <div className="project-selector-dropdown mobile-dropdown">
+            <div className="project-selector-dropdown-header">Seus Projetos</div>
+            <div className="project-selector-dropdown-list">
+              <button 
+                type="button"
+                className={`project-selector-item ${activeProjectId === null ? 'active' : ''}`}
+                onClick={() => {
+                  setActiveProjectId(null);
+                  setShowProjectDropdown(false);
+                }}
+              >
+                <span className="project-item-avatar">G</span>
+                <span className="project-item-name">Geral</span>
+              </button>
+              {projects.map(p => {
+                const role = getProjectRole(p, currentUser?.uid);
+                const isOwner = role === 'owner';
+                return (
+                  <div key={p.id} className="project-item-wrapper">
+                    <button 
+                      type="button"
+                      className={`project-selector-item ${activeProjectId === p.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setActiveProjectId(p.id);
+                        setShowProjectDropdown(false);
+                      }}
+                    >
+                      <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
+                      <span className="project-item-name">{p.name}</span>
+                      {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
+                    </button>
+                    {isOwner && (
+                      <button
+                        type="button"
+                        className="project-item-settings-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setProjectSettingsId(p.id);
+                          setCurrentView('projectSettings');
+                          setShowProjectDropdown(false);
+                        }}
+                        title="Configurações do projeto"
+                      >
+                        ⚙
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button 
+              type="button"
+              className="project-selector-add-btn"
+              onClick={() => {
+                setShowProjectModal(true);
+                setShowProjectDropdown(false);
+              }}
+            >
+              + Novo Projeto
+            </button>
+          </div>
+        )}
+
+        {showProfilePopover && (
+          <div className="profile-popover mobile-dropdown">
+            <div className="profile-popover-header">Sua Conta</div>
+            <div className="profile-popover-user-info">
+              <h4>{currentUser.username || currentUser.displayName || currentUser.email}</h4>
+              <span>{currentUser.email}</span>
+            </div>
+            <div className="profile-popover-divider"></div>
+            <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
+              ⚙ Configurações
+            </div>
+            <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
+              {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
+            </div>
+            <div className="profile-popover-divider"></div>
+            <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
+              🚪 Sair do App
+            </button>
+          </div>
+        )}
+      </header>
+
+      {/* SIDEBAR NAVIGATION (DESKTOP) */}
       <aside className="sidebar">
         <div className="sidebar-brand">
           <img 
              id="logo"
              src={theme === 'dark' ? '/karonte-logo-dark.svg' : '/karonte-logo-light.svg'} 
              alt="Karonte" 
-             style={{height: 40, width: 'auto'}} 
+             style={{height: 32, width: 'auto'}} 
           />
+        </div>
+
+        {/* DESKTOP PROJECT SELECTOR */}
+        <div className="project-selector-container">
+          <button 
+            type="button" 
+            className="project-selector-btn"
+            onClick={() => setShowProjectDropdown(prev => !prev)}
+          >
+            <div className="project-selector-avatar">
+              {activeProjectId === null ? 'G' : (projects.find(p => p.id === activeProjectId)?.name || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="project-selector-info">
+              <span className="project-selector-title">Projeto</span>
+              <span className="project-selector-name">
+                {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
+              </span>
+            </div>
+            <span className="project-selector-arrow">▾</span>
+          </button>
+          
+          {showProjectDropdown && (
+            <div className="project-selector-dropdown">
+              <div className="project-selector-dropdown-header">Seus Projetos</div>
+              <div className="project-selector-dropdown-list">
+                <button 
+                  type="button"
+                  className={`project-selector-item ${activeProjectId === null ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveProjectId(null);
+                    setShowProjectDropdown(false);
+                  }}
+                >
+                  <span className="project-item-avatar">G</span>
+                  <span className="project-item-name">Geral</span>
+                </button>
+                {projects.map(p => {
+                  const role = getProjectRole(p, currentUser?.uid);
+                  const isOwner = role === 'owner';
+                  return (
+                    <div key={p.id} className="project-item-wrapper">
+                      <button 
+                        type="button"
+                        className={`project-selector-item ${activeProjectId === p.id ? 'active' : ''}`}
+                        onClick={() => {
+                          setActiveProjectId(p.id);
+                          setShowProjectDropdown(false);
+                        }}
+                      >
+                        <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
+                        <span className="project-item-name">{p.name}</span>
+                        {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
+                      </button>
+                      {isOwner && (
+                        <button
+                          type="button"
+                          className="project-item-settings-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setProjectSettingsId(p.id);
+                            setCurrentView('projectSettings');
+                            setShowProjectDropdown(false);
+                          }}
+                          title="Configurações do projeto"
+                        >
+                          ⚙
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <button 
+                type="button"
+                className="project-selector-add-btn"
+                onClick={() => {
+                  setShowProjectModal(true);
+                  setShowProjectDropdown(false);
+                }}
+              >
+                + Novo Projeto
+              </button>
+            </div>
+          )}
         </div>
         
         <nav className="sidebar-nav">
-          <a href="#" className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('dashboard'); }}>
-            <span className="icon">⊞</span> Dashboard
-          </a>
-          <a href="#" className={`nav-item ${currentView === 'analytics' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('analytics'); }}>
-            <span className="icon">◠</span> Análises
+          <a href="#" className={`nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
+            <span className="icon">◈</span> Visão geral
           </a>
           <a href="#" className={`nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
             <span className="icon">○</span> Orçamentos
@@ -1844,21 +2345,101 @@ function App() {
             <span className="icon">☑</span> Tarefas
           </a>
         </nav>
-        <div style={{ marginTop: 'auto', padding: '20px', textAlign: 'center', fontSize: '10px', color: 'var(--text-tertiary)', opacity: 0.7 }}>
-          Desenvolvido por<br/>Lucas Eduardo Moura Santos
+
+        {/* DESKTOP USER PROFILE FOOTER */}
+        <div className="sidebar-footer">
+          <div className="user-profile-card" onClick={() => setShowProfilePopover(prev => !prev)}>
+            <div className="avatar">
+              {(currentUser.username || currentUser.displayName || currentUser.email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="user-profile-details">
+              <span className="user-profile-name">{currentUser.username || currentUser.displayName || currentUser.email}</span>
+              <span className="user-profile-email">{currentUser.email}</span>
+            </div>
+            <span className="profile-options-trigger">⚙</span>
+          </div>
+
+          {showProfilePopover && (
+            <div className="profile-popover">
+              <div className="profile-popover-header">Sua Conta</div>
+              <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
+                ⚙ Configurações
+              </div>
+              <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
+                {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
+              </div>
+              <div className="profile-popover-divider"></div>
+              <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
+                🚪 Sair do App
+              </button>
+            </div>
+          )}
         </div>
       </aside>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="mobile-bottom-nav">
+        <a href="#" className={`mobile-nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
+          <span className="icon">◈</span>
+          <span className="label">Início</span>
+        </a>
+        {canAddToProject && (
+          <button
+            type="button"
+            className="mobile-nav-fab"
+            onClick={() => setShowTransactionDrawer(true)}
+            aria-label="Novo lançamento"
+          >
+            +
+          </button>
+        )}
+        <a href="#" className={`mobile-nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
+          <span className="icon">○</span>
+          <span className="label">Orçamento</span>
+        </a>
+        <a href="#" className={`mobile-nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
+          <span className="icon">☑</span>
+          <span className="label">Tarefas</span>
+        </a>
+      </nav>
 
       {/* MAIN CONTENT AREA */}
       <div className="content-wrapper">
         <header className="top-bar">
-          <div className="user-info" onClick={() => setCurrentView('userSettings')} style={{cursor: 'pointer'}}>
-            <div className="avatar">{(currentUser.username || currentUser.displayName || currentUser.email || '?').charAt(0).toUpperCase()}</div>
-            <div className="user-details">
-              <h3>{currentUser.username || currentUser.displayName || currentUser.email}</h3>
-              <span>{new Date(selectedYear, selectedMonth-1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}</span>
+          <div className="page-context">
+            <h2 className="page-title">
+              {currentView === 'hub' && 'Visão Geral'}
+              {currentView === 'budgets' && 'Orçamentos'}
+              {currentView === 'tarefas' && 'Tarefas'}
+              {currentView === 'userSettings' && 'Configurações de Conta'}
+              {currentView === 'projectSettings' && 'Configurações do Projeto'}
+            </h2>
+            {activeProjectId !== null && (
+              <span className="project-badge">
+                {(projects.find(p => p.id === activeProjectId)?.name || '')}
+              </span>
+            )}
+          </div>
+
+          <div className="top-actions">
+            <div className="period-filter">
+               <select className="month-select" value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))}>
+                 {Array.from({length: 12}, (_, i) => i + 1).map(m => (
+                   <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('pt-BR', {month: 'short'}).toUpperCase()}</option>
+                 ))}
+               </select>
+               <select className="year-select" value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
+                  <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
+                  <option value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</option>
+               </select>
             </div>
-            <div className="notifications-wrap">
+            {filteredTransactions.length > 0 ? (
+               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relatório</button>
+            ) : null}
+            <div className="divider"></div>
+            
+            {/* DESKTOP NOTIFICATIONS BELL */}
+            <div className="notifications-wrap desktop-only">
               <button
                 type="button"
                 className="notifications-btn"
@@ -1895,76 +2476,7 @@ function App() {
               )}
             </div>
           </div>
-
-          <div className="top-actions">
-            <div className="period-filter">
-               <select className="month-select" value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))}>
-                 {Array.from({length: 12}, (_, i) => i + 1).map(m => (
-                   <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('pt-BR', {month: 'short'}).toUpperCase()}</option>
-                 ))}
-               </select>
-               <select className="year-select" value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
-                  <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
-                  <option value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</option>
-               </select>
-            </div>
-            {filteredTransactions.length > 0 ? (
-               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relatório</button>
-            ) : null}
-            <div className="divider"></div>
-            <button onClick={toggleTheme} className="text-btn" style={{marginRight: 10, fontSize: '14px', alignSelf: 'center'}} title="Mudar Tema">
-               {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-            <button onClick={handleLogout} className="logout-btn">Sair</button>
-          </div>
         </header>
-
-        {/* PROJECT TABS */}
-        <div className="project-tabs">
-           <button 
-             onClick={() => setActiveProjectId(null)}
-             className={`project-tab-btn ${activeProjectId === null ? 'active' : ''}`}
-           >
-             Geral
-           </button>
-           {projects.map(p => {
-             const role = getProjectRole(p, currentUser?.uid);
-             const isOwner = role === 'owner';
-             return (
-               <div key={p.id} className={`project-tab-wrap ${activeProjectId === p.id ? 'active' : ''}`}>
-                 <button 
-                   onClick={() => setActiveProjectId(p.id)}
-                   className={`project-tab-btn ${activeProjectId === p.id ? 'active' : ''}`}
-                 >
-                   {p.name}
-                   {p.isShared && <span className="project-tab-shared" title="Projeto compartilhado">👤</span>}
-                 </button>
-                 {isOwner && (
-                   <div className="project-tab-actions">
-                     <button
-                       type="button"
-                       className="project-tab-icon"
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         setProjectSettingsId(p.id);
-                         setCurrentView('projectSettings');
-                       }}
-                       title="Configurações do projeto"
-                     >
-                       ⚙
-                     </button>
-                   </div>
-                 )}
-               </div>
-             );
-           })}
-           <button 
-             onClick={() => setShowProjectModal(true)} 
-             className="project-tab-add"
-           >
-             + Novo Projeto
-           </button>
-        </div>
 
         {currentView === 'userSettings' && (
           <main className="main-content">
@@ -1991,7 +2503,7 @@ function App() {
                 <button
                   type="button"
                   className="text-btn"
-                  onClick={() => setCurrentView('dashboard')}
+                  onClick={() => setCurrentView('hub')}
                 >
                   ← Voltar para Dashboard
                 </button>
@@ -2010,7 +2522,7 @@ function App() {
                     <div className="list-header">
                       <h2>Projeto não encontrado</h2>
                     </div>
-                    <button type="button" className="text-btn" onClick={() => setCurrentView('dashboard')}>← Voltar</button>
+                    <button type="button" className="text-btn" onClick={() => setCurrentView('hub')}>← Voltar</button>
                   </div>
                 );
                 const rolesMap = proj.collaboratorRoles || {};
@@ -2198,7 +2710,7 @@ function App() {
                       <button
                         type="button"
                         className="text-btn"
-                        onClick={() => { setProjectSettingsId(null); setCurrentView('dashboard'); }}
+                        onClick={() => { setProjectSettingsId(null); setCurrentView('hub'); }}
                       >
                         ← Voltar para Dashboard
                       </button>
@@ -2210,415 +2722,248 @@ function App() {
           </main>
         )}
 
-        {currentView === 'dashboard' && (
-          <div className="dashboard-layout">
-            <main className="dashboard-main main-content">
-              <section className="dashboard-grid">
-                <div className="card grid-card">
-                  <div className="balance-label">SALDO ATUAL</div>
-                  <div className="balance-value">R$ {formatMoney(balance)}</div>
-                  <div className="mini-cards-container">
-                    <div className="mini-card income">
-                      <span className="mini-label">Entradas</span>
-                      <span className="mini-value income">R$ {formatMoney(totalIncome)}</span>
-                    </div>
-                    <div className="mini-card expense">
-                      <span className="mini-label">Saídas</span>
-                      <span className="mini-value expense">R$ {formatMoney(totalExpense)}</span>
-                    </div>
-                  </div>
-                </div>
+        {currentView === 'hub' && (
+          <HubView
+            formatMoney={formatMoney}
+            balance={balance}
+            totalIncome={totalIncome}
+            totalExpense={totalExpense}
+            totalBudgetLimit={totalBudgetLimit}
+            calculateForecast={calculateForecast}
+            categoryStats={categoryStats}
+            getCategoryBudgetInfo={getCategoryBudgetInfo}
+            getCatFill={getCatFill}
+            getCatTrack={getCatTrack}
+            chartTheme={chartTheme}
+            chartTooltipStyle={chartTooltipStyle}
+            monthlyEvolutionData={monthlyEvolutionData}
+            budgetStats={budgetStats}
+            ruleStats={ruleStats}
+            filteredTransactions={filteredTransactions}
+            creditCards={creditCards}
+            canAddToProject={canAddToProject}
+            canDeleteInProject={canDeleteInProject}
+            onAddClick={() => setShowTransactionDrawer(true)}
+            onDelete={handleDelete}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
+          />
+        )}
 
-              {/* FORECAST CARD */}
-              <div className={`card grid-card forecast-card ${calculateForecast().isHigh ? 'alert' : ''}`}>
-                <div className="balance-label">Previsão Mensal {calculateForecast().isHigh ? '⚠️' : '🔮'}</div>
-                <div className="balance-value">R$ {formatMoney(calculateForecast().forecastAmount)}</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                  <div className="mini-cards-container" style={{ flex: 1 }}>
-                    <div className="mini-card" style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
-                      <span className="mini-label">Média Histórica</span>
-                      <span className="mini-value" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>R$ {formatMoney(calculateForecast().monthlyAverage)}</span>
-                    </div>
-                  </div>
-                  <div className={`forecast-badge ${calculateForecast().isHigh ? 'danger' : 'success'}`}>
-                    {calculateForecast().variationPct > 0 ? '+' : ''}{calculateForecast().variationPct.toFixed(0)}%
-                  </div>
-                </div>
+        {currentView === 'budgets' && (
+            <main className="main-content">
+              {/* SUB-TABS NAVIGATION */}
+              <div className="sub-tab-nav" style={{ display: 'flex', gap: 15, marginBottom: 15, borderBottom: '1px solid var(--border-color)', paddingBottom: 10 }}>
+                <button 
+                  type="button"
+                  className={`sub-tab-item ${budgetsSubTab === 'categories' ? 'active' : ''}`}
+                  onClick={() => setBudgetsSubTab('categories')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: budgetsSubTab === 'categories' ? 'var(--text-highlight)' : 'var(--text-tertiary)',
+                    borderBottom: budgetsSubTab === 'categories' ? '2px solid var(--text-highlight)' : 'none',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Limites Orçamentários
+                </button>
+                <button 
+                  type="button"
+                  className={`sub-tab-item ${budgetsSubTab === 'cards' ? 'active' : ''}`}
+                  onClick={() => setBudgetsSubTab('cards')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '8px 16px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    color: budgetsSubTab === 'cards' ? 'var(--text-highlight)' : 'var(--text-tertiary)',
+                    borderBottom: budgetsSubTab === 'cards' ? '2px solid var(--text-highlight)' : 'none',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  Cartões de Crédito
+                </button>
               </div>
 
-                <div className="card grid-card">
-                  <div className="card-title">Despesas por Categoria (Top 3)</div>
-                  <div className="category-list">
-                    {categoryStats.length === 0 ? (
-                       <div style={{fontSize: 11, color: 'var(--text-tertiary)'}}>Nenhuma despesa no mês.</div>
-                    ) : (
-                      categoryStats.slice(0, 3).map((item, index) => {
-                        const budgetInfo = getCategoryBudgetInfo(item.name, item.total);
-                        const isUnbudgeted = budgetInfo.limit === 0;
+              {budgetsSubTab === 'categories' && (
+                <div className="card list-section">
+                   <div className="list-header">
+                     <h2>Gestão de Limite Mensal (Orçamento)</h2>
+                   </div>
+                   <div style={{fontSize: 11, color: 'var(--text-tertiary)', marginBottom: '1rem'}}>
+                      Defina um teto de gastos para alertar quando estiver próximo ao limite. Clique sobre a categoria para editar.
+                   </div>
+
+                   <div className="history-list">
+                     {expenseCategories.map(cat => {
+                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, curr) => acc + curr.amount, 0);
+                        const info = getCategoryBudgetInfo(cat, catSpent);
+                        const hasBudget = info.limit > 0;
+                        const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, cat);
+                        const trackCol = getCatTrack(cat);
                         
-                        let visualPct = isUnbudgeted ? Math.min((item.total / totalExpense)*100, 100) : budgetInfo.pct;
-                        const fillCol = budgetInfo.isOver100 ? 'var(--danger-color)' : getCatFill(index, item.name);
-                        const trackCol = getCatTrack(item.name);
-
                         return (
-                          <div key={item.name} className="cat-item">
-                            <div className="cat-header">
-                              <span className="cat-name">{item.name}</span>
-                              <div>
-                                {budgetInfo.isOver80 ? <span className="badge-alert">{visualPct.toFixed(0)}% Util</span> : null}
-                                <span className="cat-value" style={{color: fillCol}}>R$ {formatMoney(item.total)}</span>
-                              </div>
-                            </div>
-                            <div className="progress-bg" title={!isUnbudgeted ? `Limite: R$ ${budgetInfo.limit}` : ''} style={{backgroundColor: trackCol}}>
-                              <div className="progress-fill" style={{width: `${visualPct}%`, backgroundColor: fillCol}}></div>
-                            </div>
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
+                         <div key={cat} className="history-item" onClick={() => handleBudgetChange(cat)} style={{cursor: 'pointer'}}>
+                           <div className="t-details">
+                             <span className="t-name">{cat}</span>
+                             <span className="t-meta">
+                                {hasBudget ? `Gasto: R$ ${formatMoney(catSpent)} de R$ ${formatMoney(info.limit)}` : 'Sem Limite (Clique para definir)'}
+                             </span>
+                           </div>
+                            {hasBudget ? (
+                               <div style={{width: 100, marginRight: 15}}>
+                                 <div className="progress-bg" style={{backgroundColor: trackCol}}>
+                                   <div className="progress-fill" style={{width: `${info.pct}%`, backgroundColor: fillCol}}></div>
+                                 </div>
+                               </div>
+                            ) : null}
+                           <div className="t-amount" style={{color: info.isOver80 ? 'var(--danger-color)' : 'var(--text-tertiary)'}}>
+                              {hasBudget ? `${info.pct.toFixed(0)}%` : '—'}
+                           </div>
+                         </div>
+                        );
+                     })}
+                   </div>
                 </div>
-
-                <div className="card grid-card">
-                  <div className="card-title">Resumo Mensal</div>
-                  <div className="goals-list">
-                    <div className="goal-card" style={{backgroundColor: 'var(--bg-color)', border: '0.5px solid var(--border-color)'}}>
-                      <div className="goal-header">
-                        <span className="goal-name-target">Balanço do Período</span>
-                        <span className="goal-percent" style={{color: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}>
-                          {balance >= 0 ? '+' : ''}{((balance / (totalIncome || 1)) * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                      <div className="progress-bg" style={{height: 2}}>
-                        <div className="progress-fill" style={{width: '100%', backgroundColor: balance >= 0 ? 'var(--success-color)' : 'var(--danger-color)'}}></div>
-                      </div>
-                    </div>
-                    
-                    <div style={{fontSize: 10, color: 'var(--text-tertiary)', padding: '5px', lineHeight: 1.4}}>
-                      <span>Este mês você gastou </span><span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalExpense)}</span><span> e arrecadou </span><span style={{color:'var(--text-primary)'}}>R$ {formatMoney(totalIncome)}</span><span>.</span>
-                      {balance < 0 ? <span style={{color: 'var(--danger-color)'}}><br/>Déficit Operacional detectado.</span> : null}
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {canAddToProject && (
-              <section className="card form-section">
-                <form onSubmit={handleAddTransaction} className="transaction-form">
-                  <div className="form-group">
-                    <label>Descrição</label>
-                    <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Conta de Luz" required />
-                  </div>
-
-                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                    <label>Valor (R$)</label>
-                    <input type="text" value={amount} onChange={handleAmountChange} placeholder="0,00" required />
-                  </div>
-
-                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                    <label>Tipo</label>
-                    <select value={type} onChange={(e) => { setType(e.target.value); setCategory(''); setIsRecurring(false); }}>
-                      <option value="expense">Despesa</option>
-                      <option value="income">Receita</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group" style={{justifyContent: 'flex-start'}}>
-                    <label>Categoria</label>
-                    <select value={category} onChange={(e) => setCategory(e.target.value)} required>
-                      <option value="" disabled>Selecione</option>
-                      {(type === 'expense' ? expenseCategories : incomeCategories).map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button type="submit" className="submit-btn" style={{alignSelf: 'flex-end'}}>Registrar</button>
-
-                  {/* Repetir mensalmente — abaixo da linha principal, visível apenas para Despesas */}
-                  {type === 'expense' ? (
-                    <div className="recurring-row">
-                      <label className="checkbox-label">
-                        <input type="checkbox" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} />
-                        <span>Repetir mensalmente</span>
-                      </label>
-                    </div>
-                  ) : null}
-                </form>
-
-                <div className="cat-manager-toggle" onClick={() => setShowCatManager(!showCatManager)}>
-                  <span>{showCatManager ? '▾' : '▸'} Gerenciar minhas categorias personalizadas</span>
-                </div>
-
-                {showCatManager ? (
-                  <div className="cat-manager-content">
-                    <div className="cat-list-wrapper">
-                      <div>
-                        <h4>Despesas</h4>
-                        <div className="cat-chips">
-                          {customCategories.expense.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                          {customCategories.expense.map(cat => (
-                            <span key={cat} className="cat-chip">
-                              <span>{cat}</span> <button onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={{marginTop: 15}}>
-                        <h4>Receitas</h4>
-                        <div className="cat-chips">
-                          {customCategories.income.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                          {customCategories.income.map(cat => (
-                            <span key={cat} className="cat-chip">
-                              <span>{cat}</span> <button onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="cat-add-form">
-                      <input 
-                        type="text" 
-                        placeholder="Nome da categoria..." 
-                        value={newCatName} 
-                        onChange={e => setNewCatName(e.target.value)}
-                        onKeyPress={e => e.key === 'Enter' && handleAddCustomCategory()}
-                      />
-                      <select value={newCatType} onChange={e => setNewCatType(e.target.value)}>
-                        <option value="expense">Despesa</option>
-                        <option value="income">Receita</option>
-                      </select>
-                      <button onClick={handleAddCustomCategory} disabled={catSaving || !newCatName.trim()}>
-                        {catSaving ? '...' : '+'}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
               )}
 
-              <section className="card list-section">
-                <div className="list-header">
-                  <h2>Registros Recentes</h2>
-                  <span className="link-all" style={{color: 'var(--text-tertiary)'}}>{filteredTransactions.length} registros</span>
-                </div>
-                
-                <div className="history-list">
-                  {filteredTransactions.length === 0 ? (
-                    <div style={{fontSize: 11, padding: '1rem', textAlign: 'center', color: 'var(--text-tertiary)'}}>
-                      <span>Ainda não há registros lançados neste mês.</span>
+              {budgetsSubTab === 'cards' && (
+                <div className="card-manager-grid">
+                  {/* Left: Cards List */}
+                  <div className="card list-section" style={{ margin: 0 }}>
+                    <div className="list-header">
+                      <h2>Meus Cartões de Crédito</h2>
+                      <span className="link-all" style={{ color: 'var(--text-tertiary)' }}>{creditCards.length} cadastrados</span>
                     </div>
-                  ) : (
-                    filteredTransactions.map(t => (
-                      <div key={t.id} className="history-item">
-                        <div className={`t-icon-box ${t.type}`}>
-                          <div className={t.type === 'expense' ? 'arrow-down' : 'arrow-up'}></div>
+
+                    <div className="history-list" style={{ marginTop: 15 }}>
+                      {creditCards.length === 0 ? (
+                        <div style={{ fontSize: 11, padding: '2rem', textAlign: 'center', color: 'var(--text-tertiary)' }}>
+                          Nenhum cartão cadastrado. Use o formulário ao lado para cadastrar.
                         </div>
-                        <div className="t-details">
-                          <span className="t-name">
-                             <span>{t.description}</span>
-                             {t.isRecurring ? <span title="Despesa Recorrente" style={{marginLeft: 4, color: 'var(--primary-color)'}}>⟳</span> : null}
-                          </span>
-                          <span className="t-meta">
-                            <span>{t.category}</span><span> • </span><span>{t.displayDate}</span>
-                            {t.createdByName ? (<><span> • </span><span>por {t.createdByName}</span></>) : null}
-                          </span>
-                        </div>
-                        <div className={`t-amount ${t.type}`}>
-                          <span>{t.type === 'expense' ? '− ' : '+ '}</span><span>R$ {formatMoney(t.amount)}</span>
-                        </div>
-                        {canDeleteInProject && <button className="delete-btn-subtle" onClick={() => handleDelete(t.id)} title="Remover">×</button>}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-            </main>
-          </div>
-        )}
+                      ) : (
+                        creditCards.map(card => {
+                          const stats = getCardInvoiceStats(card, userTransactions);
+                          const progressPct = Math.min(stats.percentUsed, 100);
+                          let colorClass = 'safe';
+                          if (stats.percentUsed > 100) colorClass = 'danger';
+                          else if (stats.percentUsed > 80) colorClass = 'warning';
 
-        {currentView === 'analytics' && (
-           <main className="main-content">
-
-             {/* ROW 1: Area chart — evolução do saldo */}
-             <div className="card grid-card" style={{height: 320, marginBottom: 10}}>
-               <div className="card-title">Evolução do Saldo Líquido — últimos 6 meses</div>
-               <ResponsiveContainer width="100%" height="88%">
-                 <AreaChart data={monthlyEvolutionData} margin={{top: 24, right: 16, left: 0, bottom: 0}}>
-                   <defs>
-                     <linearGradient id="gradSaldo" x1="0" y1="0" x2="0" y2="1">
-                       <stop offset="5%" stopColor="#D85A30" stopOpacity={0.35}/>
-                       <stop offset="95%" stopColor="#D85A30" stopOpacity={0}/>
-                     </linearGradient>
-                   </defs>
-                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" vertical={false} />
-                   <XAxis dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} />
-                   <YAxis stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} width={52}/>
-                   <RechartsTooltip
-                     contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
-                     itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
-                     formatter={v => `R$ ${formatMoney(v)}`}
-                   />
-                   <Legend iconType="circle" wrapperStyle={{fontSize:10, paddingTop:4}} />
-                   <Area
-                     type="monotone" dataKey="Saldo" stroke="#D85A30" strokeWidth={2.5}
-                     fill="url(#gradSaldo)" dot={{fill:'#D85A30', r:3}} activeDot={{r:6}}
-                     label={({x, y, value}) => value !== 0 ? (
-                       <text x={x} y={y - 8} fill="#D85A30" fontSize={9} textAnchor="middle">
-                         {`R$${(value/1000).toFixed(1)}k`}
-                       </text>
-                     ) : null}
-                   />
-                   <Area type="monotone" dataKey="Receitas" stroke="#1FBE8E" strokeWidth={1.5} fill="none" dot={{fill:'#1FBE8E', r:2}} strokeDasharray="6 3"
-                     label={({x, y, value}) => value !== 0 ? (
-                       <text x={x} y={y - 7} fill="#1FBE8E" fontSize={8} textAnchor="middle" opacity={0.8}>
-                         {`R$${(value/1000).toFixed(1)}k`}
-                       </text>
-                     ) : null}
-                   />
-                   <Area type="monotone" dataKey="Despesas" stroke="#E84B4B" strokeWidth={1.5} fill="none" dot={{fill:'#E84B4B', r:2}} strokeDasharray="6 3"
-                     label={({x, y, value}) => value !== 0 ? (
-                       <text x={x} y={y - 7} fill="#E84B4B" fontSize={8} textAnchor="middle" opacity={0.8}>
-                         {`R$${(value/1000).toFixed(1)}k`}
-                       </text>
-                     ) : null}
-                   />
-                 </AreaChart>
-               </ResponsiveContainer>
-             </div>
-
-             {/* ROW 2: BarChart receitas x despesas  +  Donut de categorias */}
-             <div className="analytics-two-col" style={{marginBottom:10}}>
-
-               {/* BarChart */}
-               <div className="card grid-card" style={{height:300}}>
-                 <div className="card-title">Receitas vs Despesas por Mês</div>
-                 <ResponsiveContainer width="100%" height="88%">
-                   <BarChart data={monthlyEvolutionData} barCategoryGap="30%" margin={{top:20,right:16,left:0,bottom:0}}>
-                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" vertical={false} />
-                     <XAxis dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} />
-                     <YAxis stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} width={52}/>
-                     <RechartsTooltip
-                       contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
-                       itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
-                       formatter={v => `R$ ${formatMoney(v)}`}
-                     />
-                     <Legend iconType="circle" wrapperStyle={{fontSize:10}} />
-                     <Bar dataKey="Receitas" fill="#1FBE8E" radius={[4,4,0,0]} maxBarSize={32}
-                       label={{position:'top', fontSize:9, fill:'#1FBE8E', formatter: v => v > 0 ? `R$${(v/1000).toFixed(1)}k` : ''}}
-                     />
-                     <Bar dataKey="Despesas" fill="#E84B4B" radius={[4,4,0,0]} maxBarSize={32}
-                       label={{position:'top', fontSize:9, fill:'#E84B4B', formatter: v => v > 0 ? `R$${(v/1000).toFixed(1)}k` : ''}}
-                     />
-                   </BarChart>
-                 </ResponsiveContainer>
-               </div>
-
-               {/* Donut */}
-               <div className="card grid-card" style={{height:280}}>
-                 <div className="card-title">Composição de Gastos ({selectedMonth}/{selectedYear})</div>
-                 {categoryStats.length > 0 ? (
-                   <ResponsiveContainer width="100%" height="88%">
-                     <PieChart>
-                       <Pie
-                         data={categoryStats}
-                         innerRadius={58} outerRadius={82}
-                         paddingAngle={4}
-                         dataKey="total"
-                         label={({name, percent}) => `${name} ${(percent*100).toFixed(0)}%`}
-                         labelLine={{stroke:'rgba(253,232,224,0.3)', strokeWidth:1}}
-                       >
-                         {categoryStats.map((entry, index) => (
-                           <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} stroke="rgba(0,0,0,0)" />
-                         ))}
-                       </Pie>
-                       <RechartsTooltip
-                         formatter={v => `R$ ${formatMoney(v)}`}
-                         contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
-                         itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
-                       />
-                     </PieChart>
-                   </ResponsiveContainer>
-                 ) : (
-                   <div style={{fontSize:11, color:'var(--text-tertiary)', marginTop:'2rem', textAlign:'center'}}>Sem despesas no período.</div>
-                 )}
-               </div>
-             </div>
-
-             {/* ROW 3: Horizontal BarChart de categorias */}
-             {categoryStats.length > 0 ? (
-               <div className="card grid-card" style={{height: Math.max(180, categoryStats.length * 46 + 60)}}>
-                 <div className="card-title">Gasto por Categoria — detalhe</div>
-                 <ResponsiveContainer width="100%" height="88%">
-                   <BarChart
-                     data={categoryStats}
-                     layout="vertical"
-                     margin={{top:4, right:60, left:0, bottom:0}}
-                   >
-                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(253,232,224,0.06)" horizontal={false} />
-                     <XAxis type="number" stroke="var(--text-tertiary)" fontSize={10} tickFormatter={v => `R$${(v/1000).toFixed(1)}k`} tickLine={false} axisLine={false} />
-                     <YAxis type="category" dataKey="name" stroke="var(--text-tertiary)" fontSize={10} tickLine={false} axisLine={false} width={80} />
-                     <RechartsTooltip
-                       formatter={v => `R$ ${formatMoney(v)}`}
-                       contentStyle={{backgroundColor:'#1a0c0c', border:'1px solid #3a1e1e', borderRadius:8, fontSize:11}}
-                       itemStyle={{color:'var(--text-primary)'}} labelStyle={{color:'var(--text-secondary)'}}
-                     />
-                     <Bar dataKey="total" radius={[0,4,4,0]} maxBarSize={20} label={{position:'right', fontSize:10, fill:'var(--text-secondary)', formatter: v => `R$ ${formatMoney(v)}`}}>
-                       {categoryStats.map((entry, index) => (
-                         <Cell key={`hbar-${index}`} fill={COLORS[index % COLORS.length]} />
-                       ))}
-                     </Bar>
-                   </BarChart>
-                 </ResponsiveContainer>
-               </div>
-             ) : null}
-            </main>
-         )}
-
-         {currentView === 'budgets' && (
-           <main className="main-content">
-             <div className="card list-section">
-                <div className="list-header">
-                  <h2>Gestão de Limite Mensal (Orçamento)</h2>
-                </div>
-                <div style={{fontSize: 11, color: 'var(--text-tertiary)', marginBottom: '1rem'}}>
-                   Defina um teto de gastos para alertar quando estiver próximo ao limite. Clique sobre a categoria para editar.
-                </div>
-
-                <div className="history-list">
-                  {expenseCategories.map(cat => {
-                     const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, curr) => acc + curr.amount, 0);
-                     const info = getCategoryBudgetInfo(cat, catSpent);
-                     const hasBudget = info.limit > 0;
-                     const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, cat);
-                     const trackCol = getCatTrack(cat);
-                     
-                     return (
-                      <div key={cat} className="history-item" onClick={() => handleBudgetChange(cat)} style={{cursor: 'pointer'}}>
-                        <div className="t-details">
-                          <span className="t-name">{cat}</span>
-                          <span className="t-meta">
-                             {hasBudget ? `Gasto: R$ ${formatMoney(catSpent)} de R$ ${formatMoney(info.limit)}` : 'Sem Limite (Clique para definir)'}
-                          </span>
-                        </div>
-                         {hasBudget ? (
-                            <div style={{width: 100, marginRight: 15}}>
-                              <div className="progress-bg" style={{backgroundColor: trackCol}}>
-                                <div className="progress-fill" style={{width: `${info.pct}%`, backgroundColor: fillCol}}></div>
+                          return (
+                            <div key={card.id} className="history-item" style={{ cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 1rem' }}>
+                              <div className="t-details" style={{ flex: 1 }}>
+                                <span className="t-name" style={{ fontSize: 13, fontWeight: 600 }}>💳 {card.name}</span>
+                                <span className="t-meta" style={{ fontSize: 10, marginTop: 4 }}>
+                                  Vencimento: Dia {card.dueDay} • Fechamento: Dia {card.closingDay}
+                                </span>
+                                <span className="t-meta" style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                                  Fatura Atual: <strong style={{ color: 'var(--text-primary)' }}>R$ {formatMoney(stats.invoiceAmount)}</strong>
+                                </span>
                               </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, marginRight: 15, width: 140 }}>
+                                <div style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'right' }}>
+                                  Disponível: R$ {formatMoney(stats.availableLimit)} / R$ {formatMoney(card.limit)}
+                                </div>
+                                <div className="budget-progress-track" style={{ width: '100%', height: 6 }}>
+                                  <div 
+                                    className={`budget-progress-fill ${colorClass}`} 
+                                    style={{ width: `${progressPct}%` }}
+                                  />
+                                </div>
+                              </div>
+
+                              <button 
+                                type="button"
+                                className="delete-btn-subtle" 
+                                onClick={() => handleDeleteCreditCard(card.id)} 
+                                title="Remover Cartão"
+                                style={{ fontSize: 16, background: 'none', border: 'none', color: 'var(--text-tertiary)', cursor: 'pointer', padding: '0 5px' }}
+                              >
+                                ×
+                              </button>
                             </div>
-                         ) : null}
-                        <div className="t-amount" style={{color: info.isOver80 ? 'var(--danger-color)' : 'var(--text-tertiary)'}}>
-                           {hasBudget ? `${info.pct.toFixed(0)}%` : '—'}
-                        </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Add Card Form */}
+                  <div className="card form-section" style={{ margin: 0 }}>
+                    <div className="card-title" style={{ fontSize: 14, fontWeight: 700, marginBottom: 15 }}>Cadastrar Novo Cartão</div>
+                    <form onSubmit={handleCreateCreditCard} style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
+                      <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600 }}>Nome do Cartão</label>
+                        <input 
+                          type="text" 
+                          value={newCardName} 
+                          onChange={e => setNewCardName(e.target.value)} 
+                          placeholder="Ex: Nubank, Visa" 
+                          required 
+                          style={{ fontSize: 11, padding: '8px 10px', borderRadius: 6, border: '0.5px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                        />
                       </div>
-                     );
-                  })}
+
+                      <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600 }}>Limite Total (R$)</label>
+                        <input 
+                          type="text" 
+                          value={newCardLimit} 
+                          onChange={(e) => handleTaskMoneyInput(e, setNewCardLimit)} 
+                          placeholder="0,00" 
+                          required 
+                          style={{ fontSize: 11, padding: '8px 10px', borderRadius: 6, border: '0.5px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                        />
+                      </div>
+
+                      <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600 }}>Dia de Fechamento</label>
+                        <select 
+                          value={newCardClosingDay} 
+                          onChange={e => setNewCardClosingDay(e.target.value)}
+                          style={{ fontSize: 11, padding: '8px', borderRadius: 6, border: '0.5px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                        >
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                            <option key={day} value={day}>Dia {day}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600 }}>Dia de Vencimento</label>
+                        <select 
+                          value={newCardDueDay} 
+                          onChange={e => setNewCardDueDay(e.target.value)}
+                          style={{ fontSize: 11, padding: '8px', borderRadius: 6, border: '0.5px solid var(--border-color)', background: 'var(--input-bg)', color: 'var(--text-primary)' }}
+                        >
+                          {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+                            <option key={day} value={day}>Dia {day}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button 
+                        type="submit" 
+                        className="submit-btn" 
+                        disabled={cardSavingActive || !newCardName.trim()}
+                        style={{ marginTop: 10, alignSelf: 'stretch', padding: '10px' }}
+                      >
+                        {cardSavingActive ? 'Adicionando...' : 'Cadastrar Cartão'}
+                      </button>
+                    </form>
+                  </div>
                 </div>
-             </div>
-           </main>
-        )}
+              )}
+            </main>
+          )}
 
         {currentView === 'tarefas' && (
           <main className="main-content">
@@ -2662,7 +3007,7 @@ function App() {
                 </div>
               ) : null}
               {!activeProjectId ? (
-                <p className="tasks-empty-hint">Selecione um projeto nas abas acima para gerenciar as tarefas desse projeto.</p>
+                <p className="tasks-empty-hint">Selecione um projeto no seletor para gerenciar as tarefas desse projeto.</p>
               ) : tasksLoading ? (
                 <p className="tasks-empty-hint">Carregando tarefas...</p>
               ) : sortedAndFilteredTasks.length === 0 ? (
@@ -2868,6 +3213,47 @@ function App() {
            </div>
         </div>
       )}
+      <TransactionDrawer
+        open={showTransactionDrawer}
+        onClose={() => setShowTransactionDrawer(false)}
+        onSubmit={handleAddTransaction}
+        description={description}
+        setDescription={setDescription}
+        amount={amount}
+        handleAmountChange={handleAmountChange}
+        type={type}
+        setType={setType}
+        category={category}
+        setCategory={setCategory}
+        isRecurring={isRecurring}
+        setIsRecurring={setIsRecurring}
+        isInstallment={isInstallment}
+        setIsInstallment={setIsInstallment}
+        installmentTotal={installmentTotal}
+        setInstallmentTotal={setInstallmentTotal}
+        installmentCurrent={installmentCurrent}
+        setInstallmentCurrent={setInstallmentCurrent}
+        paymentMethod={paymentMethod}
+        setPaymentMethod={setPaymentMethod}
+        selectedCardId={selectedCardId}
+        setSelectedCardId={setSelectedCardId}
+        expenseCategories={expenseCategories}
+        incomeCategories={incomeCategories}
+        creditCards={creditCards}
+        showCatManager={showCatManager}
+        setShowCatManager={setShowCatManager}
+        customCategories={customCategories}
+        handleRemoveCustomCategory={handleRemoveCustomCategory}
+        newCatName={newCatName}
+        setNewCatName={setNewCatName}
+        newCatType={newCatType}
+        setNewCatType={setNewCatType}
+        newCatClassification={newCatClassification}
+        setNewCatClassification={setNewCatClassification}
+        handleAddCustomCategory={handleAddCustomCategory}
+        catSaving={catSaving}
+      />
+
       {/* NEW PROJECT MODAL */}
       {showProjectModal && (
         <div className="modal-overlay">

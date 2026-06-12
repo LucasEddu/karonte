@@ -120,6 +120,19 @@ service cloud.firestore {
       allow read, write: if isAuthenticated() && isActiveUser() && request.auth.uid == uid;
     }
 
+    // creditCards: own docs OR docs in a project where user is owner/collaborator
+    match /creditCards/{cardId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || (resource.data.get('projectId', null) != null && resource.data.projectId != 'geral' && isProjectMember(resource.data.projectId)));
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid
+        && (request.resource.data.get('projectId', null) == null || request.resource.data.projectId == 'geral' || isProjectMember(request.resource.data.projectId));
+      allow update, delete: if isAuthenticated() && isActiveUser()
+        && (resource.data.userId == request.auth.uid
+            || (resource.data.get('projectId', null) != null && resource.data.projectId != 'geral' && isProjectMember(resource.data.projectId)));
+    }
+
     // Bloqueia tudo que não foi explicitamente liberado
     match /{document=**} {
       allow read, write: if false;
