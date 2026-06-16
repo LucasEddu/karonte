@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
-import { getUserCategories, saveUserCategories, normalizeCategoryList } from './services/categoriesService';
+import { getUserCategories, saveUserCategories, normalizeCategoryList, getCategoryLabel } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
@@ -98,8 +98,14 @@ function App() {
   const DEFAULT_INCOME_CATS  = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
 
   // Merged lists — defaults + custom (no duplicates)
-  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...normalizeCategoryList(customCategories.expense)])];
-  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...normalizeCategoryList(customCategories.income)])];
+  const expenseCategories = useMemo(
+    () => [...new Set([...DEFAULT_EXPENSE_CATS, ...normalizeCategoryList(customCategories.expense)])],
+    [customCategories.expense]
+  );
+  const incomeCategories = useMemo(
+    () => [...new Set([...DEFAULT_INCOME_CATS, ...normalizeCategoryList(customCategories.income)])],
+    [customCategories.income]
+  );
 
   const chartTheme = useMemo(() => {
     const root = document.documentElement;
@@ -441,7 +447,10 @@ function App() {
          } else {
            txs = await getUserTransactions(currentUser.uid, null);
          }
-         setTransactions(txs);
+         setTransactions(txs.map(t => ({
+           ...t,
+           category: getCategoryLabel(t.category, 'Outros'),
+         })));
 
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
          setBudgets(userBudgets);
@@ -450,7 +459,10 @@ function App() {
          setCustomCategories(cats);
 
          const cards = await getCreditCards(currentUser.uid, activeProjectId);
-         setCreditCards(cards);
+         setCreditCards(cards.map(card => ({
+           ...card,
+           name: getCategoryLabel(card.name, 'Cartão'),
+         })));
 
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
@@ -932,8 +944,9 @@ function App() {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     
     return expenseCategories.map(cat => {
-       const total = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
-       return { name: cat, total };
+       const catLabel = getCategoryLabel(cat);
+       const total = expenses.filter(t => t.category === catLabel).reduce((sum, item) => sum + item.amount, 0);
+       return { name: catLabel, total };
     }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
   }, [filteredTransactions]);
 
@@ -971,10 +984,11 @@ function App() {
   const budgetStats = useMemo(() => {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     return expenseCategories.map(cat => {
-      const limit = budgets[cat] || 0;
-      const spent = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
+      const catLabel = getCategoryLabel(cat);
+      const limit = budgets[catLabel] || 0;
+      const spent = expenses.filter(t => t.category === catLabel).reduce((sum, item) => sum + item.amount, 0);
       const percent = limit > 0 ? (spent / limit) * 100 : 0;
-      return { name: cat, spent, limit, percent };
+      return { name: catLabel, spent, limit, percent };
     }).filter(item => item.limit > 0).sort((a,b) => b.spent - a.spent);
   }, [filteredTransactions, budgets, expenseCategories]);
 
@@ -1247,8 +1261,8 @@ function App() {
       return;
     }
     const updated = {
-      expense: [...customCategories.expense],
-      income: [...customCategories.income],
+      expense: normalizeCategoryList(customCategories.expense),
+      income: normalizeCategoryList(customCategories.income),
       classifications: { ...customCategories.classifications }
     };
     const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
@@ -1274,8 +1288,8 @@ function App() {
     const updatedClassifications = { ...customCategories.classifications };
     delete updatedClassifications[catName];
     const updated = {
-      expense: customCategories.expense.filter(c => c !== catName),
-      income:  customCategories.income.filter(c  => c !== catName),
+      expense: customCategories.expense.filter(c => getCategoryLabel(c) !== catName),
+      income:  customCategories.income.filter(c  => getCategoryLabel(c) !== catName),
       classifications: updatedClassifications
     };
     if (category === catName) setCategory('');
@@ -1314,7 +1328,7 @@ function App() {
         closingDay: closingDayNum,
         dueDay: dueDayNum
       }, activeProjectId);
-      setCreditCards([...creditCards, savedCard]);
+      setCreditCards([...creditCards, { ...savedCard, name: getCategoryLabel(savedCard.name, 'Cartão') }]);
       setNewCardName('');
       setNewCardLimit('');
       setNewCardClosingDay(5);
@@ -1502,7 +1516,7 @@ function App() {
     let inferType = incomeKeywords.some(kw => normalized.includes(kw)) ? 'income' : 'expense';
 
     if (inferType === 'expense') {
-      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+      const matchCustomIncome = customCategories.income.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
       if (matchCustomIncome) inferType = 'income';
     }
 
@@ -1516,7 +1530,7 @@ function App() {
     };
 
     if (inferType === 'expense') {
-       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       const matchCustom = customCategories.expense.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
        if (matchCustom) inferCategory = matchCustom;
        else {
          for (const [catName, regex] of Object.entries(categoryMaps)) {
@@ -1524,7 +1538,7 @@ function App() {
          }
        }
     } else {
-       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       const matchCustom = customCategories.income.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
        if (matchCustom) inferCategory = matchCustom;
        else if (/(salario|pagamento|pro-labore)/.test(normalized)) inferCategory = 'Salário';
        else if (/(freelance|projeto|job|freela)/.test(normalized)) inferCategory = 'Freelance';
@@ -1742,7 +1756,7 @@ function App() {
       description: action.description,
       amount: action.amount,
       type: action.type,
-      category: action.category,
+      category: getCategoryLabel(action.category, 'Outros'),
       isRecurring: false,
       date: dateObj.toISOString(), 
       displayDate: dateObj.toLocaleDateString('pt-BR')
@@ -2803,16 +2817,17 @@ function App() {
 
                    <div className="history-list">
                      {expenseCategories.map(cat => {
-                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, curr) => acc + curr.amount, 0);
-                        const info = getCategoryBudgetInfo(cat, catSpent);
+                        const catLabel = getCategoryLabel(cat);
+                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === catLabel).reduce((acc, curr) => acc + curr.amount, 0);
+                        const info = getCategoryBudgetInfo(catLabel, catSpent);
                         const hasBudget = info.limit > 0;
-                        const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, cat);
-                        const trackCol = getCatTrack(cat);
+                        const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, catLabel);
+                        const trackCol = getCatTrack(catLabel);
                         
                         return (
-                         <div key={cat} className="history-item" onClick={() => handleBudgetChange(cat)} style={{cursor: 'pointer'}}>
+                         <div key={catLabel} className="history-item" onClick={() => handleBudgetChange(catLabel)} style={{cursor: 'pointer'}}>
                            <div className="t-details">
-                             <span className="t-name">{cat}</span>
+                             <span className="t-name">{catLabel}</span>
                              <span className="t-meta">
                                 {hasBudget ? `Gasto: R$ ${formatMoney(catSpent)} de R$ ${formatMoney(info.limit)}` : 'Sem Limite (Clique para definir)'}
                              </span>
@@ -3139,7 +3154,7 @@ function App() {
                             <span>Info:</span> <span className="action-val">{pendingActions[0].description}</span>
                         </div>
                         <div className="action-detail">
-                            <span>Categoria:</span> <span className="action-val">{pendingActions[0].category}</span>
+                            <span>Categoria:</span> <span className="action-val">{getCategoryLabel(pendingActions[0].category)}</span>
                         </div>
                         <div className="action-buttons">
                             <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>

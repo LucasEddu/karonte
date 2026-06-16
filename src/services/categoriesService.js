@@ -3,16 +3,42 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const COLLECTION = 'userCategories';
 
-/** Converte entrada legada ({ name, id }) ou string em nome de categoria. */
+/** Converte entrada legada ({ name, id }, mapa, etc.) em nome de categoria. */
 export const normalizeCategoryName = (entry) => {
   if (typeof entry === 'string') return entry.trim();
-  if (entry && typeof entry === 'object' && typeof entry.name === 'string') return entry.name.trim();
+  if (entry == null) return null;
+  if (typeof entry === 'object') {
+    if (typeof entry.name === 'string') return entry.name.trim();
+    if (typeof entry.label === 'string') return entry.label.trim();
+    if (typeof entry.title === 'string') return entry.title.trim();
+  }
   return null;
 };
 
-/** Garante lista de nomes únicos (strings). */
+/** Texto seguro para renderizar categoria na UI. */
+export const getCategoryLabel = (entry, fallback = 'Outros') => {
+  return normalizeCategoryName(entry) || fallback;
+};
+
+/** Garante lista de nomes únicos (strings). Aceita array, objeto único ou mapa. */
 export const normalizeCategoryList = (list) => {
-  const names = (list || []).map(normalizeCategoryName).filter(Boolean);
+  if (list == null) return [];
+
+  let items;
+  if (Array.isArray(list)) {
+    items = list;
+  } else if (typeof list === 'object') {
+    // Documento legado: expense como objeto único { name, id }
+    if ('name' in list || 'label' in list || 'title' in list) {
+      items = [list];
+    } else {
+      items = Object.values(list);
+    }
+  } else {
+    items = [list];
+  }
+
+  const names = items.map(normalizeCategoryName).filter(Boolean);
   return [...new Set(names)];
 };
 
@@ -66,4 +92,3 @@ export const saveUserCategories = async (uid, categories) => {
     throw err;
   }
 };
-

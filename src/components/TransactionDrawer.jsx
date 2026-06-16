@@ -1,4 +1,5 @@
 import React from 'react';
+import { getCategoryLabel } from '../services/categoriesService';
 
 export default function TransactionDrawer({
   open,
@@ -121,9 +122,12 @@ export default function TransactionDrawer({
                 <label>Categoria</label>
                 <select value={category} onChange={(e) => setCategory(e.target.value)} required>
                   <option value="" disabled>Selecione</option>
-                  {(type === 'expense' ? expenseCategories : incomeCategories).map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {(type === 'expense' ? expenseCategories : incomeCategories).map(cat => {
+                    const catLabel = getCategoryLabel(cat);
+                    return (
+                      <option key={catLabel} value={catLabel}>{catLabel}</option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
@@ -219,22 +223,28 @@ export default function TransactionDrawer({
                   <h4>Despesas</h4>
                   <div className="cat-chips">
                     {customCategories.expense.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                    {customCategories.expense.map(cat => (
-                      <span key={cat} className="cat-chip">
-                        <span>{cat}</span> <button type="button" onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
+                    {customCategories.expense.map(cat => {
+                      const catLabel = getCategoryLabel(cat);
+                      return (
+                      <span key={catLabel} className="cat-chip">
+                        <span>{catLabel}</span> <button type="button" onClick={() => handleRemoveCustomCategory(catLabel, 'expense')}>×</button>
                       </span>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
                 <div style={{ marginTop: 15 }}>
                   <h4>Receitas</h4>
                   <div className="cat-chips">
                     {customCategories.income.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                    {customCategories.income.map(cat => (
-                      <span key={cat} className="cat-chip">
-                        <span>{cat}</span> <button type="button" onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
+                    {customCategories.income.map(cat => {
+                      const catLabel = getCategoryLabel(cat);
+                      return (
+                      <span key={catLabel} className="cat-chip">
+                        <span>{catLabel}</span> <button type="button" onClick={() => handleRemoveCustomCategory(catLabel, 'income')}>×</button>
                       </span>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
