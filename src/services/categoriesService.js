@@ -15,9 +15,15 @@ export const normalizeCategoryName = (entry) => {
   return null;
 };
 
-/** Texto seguro para renderizar categoria na UI. */
+/** Texto seguro para renderizar categoria na UI. Nunca retorna objetos. */
 export const getCategoryLabel = (entry, fallback = 'Outros') => {
-  return normalizeCategoryName(entry) || fallback;
+  const label = normalizeCategoryName(entry);
+  return typeof label === 'string' && label.length > 0 ? label : fallback;
+};
+
+/** Lista final garantida como strings para renderização React. */
+export const sanitizeCategoryList = (list) => {
+  return normalizeCategoryList(list).map((name) => getCategoryLabel(name, '')).filter(Boolean);
 };
 
 /** Garante lista de nomes únicos (strings). Aceita array, objeto único ou mapa. */
@@ -62,8 +68,8 @@ export const getUserCategories = async (uid) => {
     if (snap.exists()) {
       const data = snap.data();
       return {
-        expense: normalizeCategoryList(data.expense),
-        income: normalizeCategoryList(data.income),
+        expense: sanitizeCategoryList(data.expense),
+        income: sanitizeCategoryList(data.income),
         classifications: normalizeClassifications(data.classifications),
       };
     }
@@ -82,8 +88,8 @@ export const getUserCategories = async (uid) => {
 export const saveUserCategories = async (uid, categories) => {
   try {
     const payload = {
-      expense: normalizeCategoryList(categories.expense),
-      income: normalizeCategoryList(categories.income),
+      expense: sanitizeCategoryList(categories.expense),
+      income: sanitizeCategoryList(categories.income),
       classifications: normalizeClassifications(categories.classifications),
     };
     await setDoc(doc(db, COLLECTION, uid), payload);

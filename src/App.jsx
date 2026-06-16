@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
-import { getUserCategories, saveUserCategories, normalizeCategoryList, getCategoryLabel } from './services/categoriesService';
+import { getUserCategories, saveUserCategories, normalizeCategoryList, getCategoryLabel, sanitizeCategoryList } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
@@ -99,13 +99,23 @@ function App() {
 
   // Merged lists — defaults + custom (no duplicates)
   const expenseCategories = useMemo(
-    () => [...new Set([...DEFAULT_EXPENSE_CATS, ...normalizeCategoryList(customCategories.expense)])],
+    () => [...new Set([...sanitizeCategoryList(DEFAULT_EXPENSE_CATS), ...sanitizeCategoryList(customCategories.expense)])],
     [customCategories.expense]
   );
   const incomeCategories = useMemo(
-    () => [...new Set([...DEFAULT_INCOME_CATS, ...normalizeCategoryList(customCategories.income)])],
+    () => [...new Set([...sanitizeCategoryList(DEFAULT_INCOME_CATS), ...sanitizeCategoryList(customCategories.income)])],
     [customCategories.income]
   );
+
+  const normalizeTransactionRecord = (t) => ({
+    ...t,
+    category: getCategoryLabel(t?.category, 'Outros'),
+  });
+
+  const normalizeCardRecord = (card) => ({
+    ...card,
+    name: getCategoryLabel(card?.name, 'Cartão'),
+  });
 
   const chartTheme = useMemo(() => {
     const root = document.documentElement;
@@ -238,6 +248,18 @@ function App() {
     localStorage.setItem('finance_theme', theme);
   }, [theme]);
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+
+  // Repara categorias legadas ({ id, name }) que ainda estejam no state
+  useEffect(() => {
+    const hasLegacyExpense = customCategories.expense.some(c => typeof c !== 'string');
+    const hasLegacyIncome = customCategories.income.some(c => typeof c !== 'string');
+    if (!hasLegacyExpense && !hasLegacyIncome) return;
+    setCustomCategories(prev => ({
+      ...prev,
+      expense: sanitizeCategoryList(prev.expense),
+      income: sanitizeCategoryList(prev.income),
+    }));
+  }, [customCategories.expense, customCategories.income]);
 
   // Handle click outside dropdowns and popovers
   useEffect(() => {
@@ -447,22 +469,20 @@ function App() {
          } else {
            txs = await getUserTransactions(currentUser.uid, null);
          }
-         setTransactions(txs.map(t => ({
-           ...t,
-           category: getCategoryLabel(t.category, 'Outros'),
-         })));
+         setTransactions(txs.map(normalizeTransactionRecord));
 
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
          setBudgets(userBudgets);
 
          const cats = await getUserCategories(currentUser.uid);
-         setCustomCategories(cats);
+         setCustomCategories({
+           expense: sanitizeCategoryList(cats.expense),
+           income: sanitizeCategoryList(cats.income),
+           classifications: cats.classifications || {},
+         });
 
          const cards = await getCreditCards(currentUser.uid, activeProjectId);
-         setCreditCards(cards.map(card => ({
-           ...card,
-           name: getCategoryLabel(card.name, 'Cartão'),
-         })));
+         setCreditCards(cards.map(normalizeCardRecord));
 
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
@@ -519,7 +539,7 @@ function App() {
                 const targetDate = new Date(y, m - 1, targetDay, 12, 0, 0); // Noon
 
                 newBatch.push({
-                   ...rt,
+                   ...normalizeTransactionRecord(rt),
                    id: crypto.randomUUID(),
                    parentId: rt.parentId || rt.id, // Linking back to original
                    date: targetDate.toISOString(),
@@ -683,7 +703,7 @@ function App() {
     try {
       const createdByName = currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
-      setTransactions([savedDoc, ...transactions]);
+      setTransactions([normalizeTransactionRecord(savedDoc), ...transactions]);
       setDescription(''); 
       setAmount(''); 
       setCategory(''); 
@@ -1256,7 +1276,7 @@ function App() {
     const name = newCatName.trim();
     if (!name || !currentUser) return;
     const allForType = newCatType === 'expense' ? expenseCategories : incomeCategories;
-    if (allForType.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
+    if (allForType.map(c => getCategoryLabel(c).toLowerCase()).includes(name.toLowerCase())) {
       alert('Esta categoria já existe.');
       return;
     }
@@ -1273,7 +1293,11 @@ function App() {
     setCatSaving(true);
     try {
       await saveUserCategories(currentUser.uid, updated);
-      setCustomCategories(updated);
+      setCustomCategories({
+        expense: sanitizeCategoryList(updated.expense),
+        income: sanitizeCategoryList(updated.income),
+        classifications: updated.classifications,
+      });
       setNewCatName('');
       setShowCatManager(false);
     } catch (err) {
@@ -1295,7 +1319,11 @@ function App() {
     if (category === catName) setCategory('');
     try {
       await saveUserCategories(currentUser.uid, updated);
-      setCustomCategories(updated);
+      setCustomCategories({
+        expense: sanitizeCategoryList(updated.expense),
+        income: sanitizeCategoryList(updated.income),
+        classifications: updated.classifications,
+      });
     } catch(err) {
       alert('Erro ao remover categoria.');
     }
@@ -1328,7 +1356,7 @@ function App() {
         closingDay: closingDayNum,
         dueDay: dueDayNum
       }, activeProjectId);
-      setCreditCards([...creditCards, { ...savedCard, name: getCategoryLabel(savedCard.name, 'Cartão') }]);
+      setCreditCards([...creditCards, normalizeCardRecord(savedCard)]);
       setNewCardName('');
       setNewCardLimit('');
       setNewCardClosingDay(5);
@@ -1764,7 +1792,7 @@ function App() {
     
     try {
       const savedDoc = await addTransaction(newTransaction);
-      setTransactions([savedDoc, ...transactions]);
+      setTransactions([normalizeTransactionRecord(savedDoc), ...transactions]);
       
       const updatedActions = pendingActions.slice(1);
       setPendingActions(updatedActions);
@@ -2874,7 +2902,7 @@ function App() {
                           return (
                             <div key={card.id} className="history-item" style={{ cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 1rem' }}>
                               <div className="t-details" style={{ flex: 1 }}>
-                                <span className="t-name" style={{ fontSize: 13, fontWeight: 600 }}>💳 {card.name}</span>
+                                <span className="t-name" style={{ fontSize: 13, fontWeight: 600 }}>💳 {getCategoryLabel(card.name, 'Cartão')}</span>
                                 <span className="t-meta" style={{ fontSize: 10, marginTop: 4 }}>
                                   Vencimento: Dia {card.dueDay} • Fechamento: Dia {card.closingDay}
                                 </span>

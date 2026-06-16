@@ -1,4 +1,5 @@
 import React from 'react';
+import { getCategoryLabel } from '../services/categoriesService';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -90,15 +91,16 @@ export default function HubView({
               <div className="hub-empty">Nenhuma despesa no mês.</div>
             ) : (
               categoryStats.slice(0, 4).map((item, index) => {
-                const budgetInfo = getCategoryBudgetInfo(item.name, item.total);
+                const categoryName = getCategoryLabel(item.name);
+                const budgetInfo = getCategoryBudgetInfo(categoryName, item.total);
                 const isUnbudgeted = budgetInfo.limit === 0;
                 const visualPct = isUnbudgeted ? Math.min((item.total / totalExpense) * 100, 100) : budgetInfo.pct;
-                const fillCol = budgetInfo.isOver100 ? 'var(--danger-color)' : getCatFill(index, item.name);
-                const trackCol = getCatTrack(item.name);
+                const fillCol = budgetInfo.isOver100 ? 'var(--danger-color)' : getCatFill(index, categoryName);
+                const trackCol = getCatTrack(categoryName);
                 return (
-                  <div key={item.name} className="cat-item">
+                  <div key={categoryName} className="cat-item">
                     <div className="cat-header">
-                      <span className="cat-name">{item.name}</span>
+                      <span className="cat-name">{categoryName}</span>
                       <div>
                         {budgetInfo.isOver80 ? <span className="badge-alert">{visualPct.toFixed(0)}%</span> : null}
                         <span className="cat-value" style={{ color: fillCol }}>R$ {formatMoney(item.total)}</span>
@@ -162,13 +164,14 @@ export default function HubView({
           <div className="budget-real-list">
             {budgetStats.length > 0 ? (
               budgetStats.slice(0, 4).map(stat => {
+                const categoryName = getCategoryLabel(stat.name);
                 let colorClass = 'safe';
                 if (stat.percent > 100) colorClass = 'danger';
                 else if (stat.percent > 80) colorClass = 'warning';
                 return (
-                  <div key={stat.name} className="budget-real-item">
+                  <div key={categoryName} className="budget-real-item">
                     <div className="budget-real-item-header">
-                      <span className="budget-real-name">{stat.name}</span>
+                      <span className="budget-real-name">{categoryName}</span>
                       <span className="budget-real-values">R$ {formatMoney(stat.spent)}</span>
                     </div>
                     <div className="budget-progress-track">
@@ -234,7 +237,7 @@ export default function HubView({
             </div>
             <div className="hub-mini-metric">
               <span className="hub-mini-metric-label">Maior gasto</span>
-              <span className="hub-mini-metric-value">{categoryStats[0]?.name || '—'}</span>
+              <span className="hub-mini-metric-value">{getCategoryLabel(categoryStats[0]?.name, '—')}</span>
             </div>
           </div>
         </article>
@@ -296,12 +299,12 @@ export default function HubView({
                             ) : null}
                   </span>
                   <span className="t-meta">
-                    <span>{t.category}</span>
+                    <span>{getCategoryLabel(t.category)}</span>
                     {t.paymentMethod === 'card' && t.cardId && (
                       <>
                         <span> • </span>
                         <span style={{ color: 'var(--text-highlight)', fontWeight: 600 }}>
-                          💳 {creditCards.find(c => c.id === t.cardId)?.name || 'Cartão'}
+                          💳 {getCategoryLabel(creditCards.find(c => c.id === t.cardId)?.name, 'Cartão')}
                         </span>
                       </>
                     )}

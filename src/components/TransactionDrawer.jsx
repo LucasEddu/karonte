@@ -151,7 +151,7 @@ export default function TransactionDrawer({
                         <option value="" disabled>Cadastre cartões em Orçamentos</option>
                       ) : (
                         creditCards.map(card => (
-                          <option key={card.id} value={card.id}>{card.name}</option>
+                          <option key={card.id} value={card.id}>{getCategoryLabel(card.name, 'Cartão')}</option>
                         ))
                       )}
                     </select>
