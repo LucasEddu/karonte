@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
-import { getUserCategories, saveUserCategories } from './services/categoriesService';
+import { getUserCategories, saveUserCategories, normalizeCategoryList, getCategoryLabel, sanitizeCategoryList } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
@@ -98,8 +98,24 @@ function App() {
   const DEFAULT_INCOME_CATS  = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
 
   // Merged lists — defaults + custom (no duplicates)
-  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...customCategories.expense])];
-  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...customCategories.income])];
+  const expenseCategories = useMemo(
+    () => [...new Set([...sanitizeCategoryList(DEFAULT_EXPENSE_CATS), ...sanitizeCategoryList(customCategories.expense)])],
+    [customCategories.expense]
+  );
+  const incomeCategories = useMemo(
+    () => [...new Set([...sanitizeCategoryList(DEFAULT_INCOME_CATS), ...sanitizeCategoryList(customCategories.income)])],
+    [customCategories.income]
+  );
+
+  const normalizeTransactionRecord = (t) => ({
+    ...t,
+    category: getCategoryLabel(t?.category, 'Outros'),
+  });
+
+  const normalizeCardRecord = (card) => ({
+    ...card,
+    name: getCategoryLabel(card?.name, 'Cartão'),
+  });
 
   const chartTheme = useMemo(() => {
     const root = document.documentElement;
@@ -232,6 +248,18 @@ function App() {
     localStorage.setItem('finance_theme', theme);
   }, [theme]);
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+
+  // Repara categorias legadas ({ id, name }) que ainda estejam no state
+  useEffect(() => {
+    const hasLegacyExpense = customCategories.expense.some(c => typeof c !== 'string');
+    const hasLegacyIncome = customCategories.income.some(c => typeof c !== 'string');
+    if (!hasLegacyExpense && !hasLegacyIncome) return;
+    setCustomCategories(prev => ({
+      ...prev,
+      expense: sanitizeCategoryList(prev.expense),
+      income: sanitizeCategoryList(prev.income),
+    }));
+  }, [customCategories.expense, customCategories.income]);
 
   // Handle click outside dropdowns and popovers
   useEffect(() => {
@@ -441,16 +469,20 @@ function App() {
          } else {
            txs = await getUserTransactions(currentUser.uid, null);
          }
-         setTransactions(txs);
+         setTransactions(txs.map(normalizeTransactionRecord));
 
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
          setBudgets(userBudgets);
 
          const cats = await getUserCategories(currentUser.uid);
-         setCustomCategories(cats);
+         setCustomCategories({
+           expense: sanitizeCategoryList(cats.expense),
+           income: sanitizeCategoryList(cats.income),
+           classifications: cats.classifications || {},
+         });
 
          const cards = await getCreditCards(currentUser.uid, activeProjectId);
-         setCreditCards(cards);
+         setCreditCards(cards.map(normalizeCardRecord));
 
          if (currentUser.role === 'admin') {
             const allU = await getAllUsers();
@@ -507,7 +539,7 @@ function App() {
                 const targetDate = new Date(y, m - 1, targetDay, 12, 0, 0); // Noon
 
                 newBatch.push({
-                   ...rt,
+                   ...normalizeTransactionRecord(rt),
                    id: crypto.randomUUID(),
                    parentId: rt.parentId || rt.id, // Linking back to original
                    date: targetDate.toISOString(),
@@ -671,7 +703,7 @@ function App() {
     try {
       const createdByName = currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
-      setTransactions([savedDoc, ...transactions]);
+      setTransactions([normalizeTransactionRecord(savedDoc), ...transactions]);
       setDescription(''); 
       setAmount(''); 
       setCategory(''); 
@@ -932,8 +964,9 @@ function App() {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     
     return expenseCategories.map(cat => {
-       const total = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
-       return { name: cat, total };
+       const catLabel = getCategoryLabel(cat);
+       const total = expenses.filter(t => t.category === catLabel).reduce((sum, item) => sum + item.amount, 0);
+       return { name: catLabel, total };
     }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
   }, [filteredTransactions]);
 
@@ -971,10 +1004,11 @@ function App() {
   const budgetStats = useMemo(() => {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     return expenseCategories.map(cat => {
-      const limit = budgets[cat] || 0;
-      const spent = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
+      const catLabel = getCategoryLabel(cat);
+      const limit = budgets[catLabel] || 0;
+      const spent = expenses.filter(t => t.category === catLabel).reduce((sum, item) => sum + item.amount, 0);
       const percent = limit > 0 ? (spent / limit) * 100 : 0;
-      return { name: cat, spent, limit, percent };
+      return { name: catLabel, spent, limit, percent };
     }).filter(item => item.limit > 0).sort((a,b) => b.spent - a.spent);
   }, [filteredTransactions, budgets, expenseCategories]);
 
@@ -1242,13 +1276,13 @@ function App() {
     const name = newCatName.trim();
     if (!name || !currentUser) return;
     const allForType = newCatType === 'expense' ? expenseCategories : incomeCategories;
-    if (allForType.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
+    if (allForType.map(c => getCategoryLabel(c).toLowerCase()).includes(name.toLowerCase())) {
       alert('Esta categoria já existe.');
       return;
     }
     const updated = {
-      expense: [...customCategories.expense],
-      income: [...customCategories.income],
+      expense: normalizeCategoryList(customCategories.expense),
+      income: normalizeCategoryList(customCategories.income),
       classifications: { ...customCategories.classifications }
     };
     const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
@@ -1259,7 +1293,11 @@ function App() {
     setCatSaving(true);
     try {
       await saveUserCategories(currentUser.uid, updated);
-      setCustomCategories(updated);
+      setCustomCategories({
+        expense: sanitizeCategoryList(updated.expense),
+        income: sanitizeCategoryList(updated.income),
+        classifications: updated.classifications,
+      });
       setNewCatName('');
       setShowCatManager(false);
     } catch (err) {
@@ -1274,14 +1312,18 @@ function App() {
     const updatedClassifications = { ...customCategories.classifications };
     delete updatedClassifications[catName];
     const updated = {
-      expense: customCategories.expense.filter(c => c !== catName),
-      income:  customCategories.income.filter(c  => c !== catName),
+      expense: customCategories.expense.filter(c => getCategoryLabel(c) !== catName),
+      income:  customCategories.income.filter(c  => getCategoryLabel(c) !== catName),
       classifications: updatedClassifications
     };
     if (category === catName) setCategory('');
     try {
       await saveUserCategories(currentUser.uid, updated);
-      setCustomCategories(updated);
+      setCustomCategories({
+        expense: sanitizeCategoryList(updated.expense),
+        income: sanitizeCategoryList(updated.income),
+        classifications: updated.classifications,
+      });
     } catch(err) {
       alert('Erro ao remover categoria.');
     }
@@ -1314,7 +1356,7 @@ function App() {
         closingDay: closingDayNum,
         dueDay: dueDayNum
       }, activeProjectId);
-      setCreditCards([...creditCards, savedCard]);
+      setCreditCards([...creditCards, normalizeCardRecord(savedCard)]);
       setNewCardName('');
       setNewCardLimit('');
       setNewCardClosingDay(5);
@@ -1502,7 +1544,7 @@ function App() {
     let inferType = incomeKeywords.some(kw => normalized.includes(kw)) ? 'income' : 'expense';
 
     if (inferType === 'expense') {
-      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+      const matchCustomIncome = customCategories.income.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
       if (matchCustomIncome) inferType = 'income';
     }
 
@@ -1516,7 +1558,7 @@ function App() {
     };
 
     if (inferType === 'expense') {
-       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       const matchCustom = customCategories.expense.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
        if (matchCustom) inferCategory = matchCustom;
        else {
          for (const [catName, regex] of Object.entries(categoryMaps)) {
@@ -1524,7 +1566,7 @@ function App() {
          }
        }
     } else {
-       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
+       const matchCustom = customCategories.income.find(c => normalized.includes(getCategoryLabel(c).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
        if (matchCustom) inferCategory = matchCustom;
        else if (/(salario|pagamento|pro-labore)/.test(normalized)) inferCategory = 'Salário';
        else if (/(freelance|projeto|job|freela)/.test(normalized)) inferCategory = 'Freelance';
@@ -1742,7 +1784,7 @@ function App() {
       description: action.description,
       amount: action.amount,
       type: action.type,
-      category: action.category,
+      category: getCategoryLabel(action.category, 'Outros'),
       isRecurring: false,
       date: dateObj.toISOString(), 
       displayDate: dateObj.toLocaleDateString('pt-BR')
@@ -1750,7 +1792,7 @@ function App() {
     
     try {
       const savedDoc = await addTransaction(newTransaction);
-      setTransactions([savedDoc, ...transactions]);
+      setTransactions([normalizeTransactionRecord(savedDoc), ...transactions]);
       
       const updatedActions = pendingActions.slice(1);
       setPendingActions(updatedActions);
@@ -2803,16 +2845,17 @@ function App() {
 
                    <div className="history-list">
                      {expenseCategories.map(cat => {
-                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, curr) => acc + curr.amount, 0);
-                        const info = getCategoryBudgetInfo(cat, catSpent);
+                        const catLabel = getCategoryLabel(cat);
+                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === catLabel).reduce((acc, curr) => acc + curr.amount, 0);
+                        const info = getCategoryBudgetInfo(catLabel, catSpent);
                         const hasBudget = info.limit > 0;
-                        const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, cat);
-                        const trackCol = getCatTrack(cat);
+                        const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, catLabel);
+                        const trackCol = getCatTrack(catLabel);
                         
                         return (
-                         <div key={cat} className="history-item" onClick={() => handleBudgetChange(cat)} style={{cursor: 'pointer'}}>
+                         <div key={catLabel} className="history-item" onClick={() => handleBudgetChange(catLabel)} style={{cursor: 'pointer'}}>
                            <div className="t-details">
-                             <span className="t-name">{cat}</span>
+                             <span className="t-name">{catLabel}</span>
                              <span className="t-meta">
                                 {hasBudget ? `Gasto: R$ ${formatMoney(catSpent)} de R$ ${formatMoney(info.limit)}` : 'Sem Limite (Clique para definir)'}
                              </span>
@@ -2859,7 +2902,7 @@ function App() {
                           return (
                             <div key={card.id} className="history-item" style={{ cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 1rem' }}>
                               <div className="t-details" style={{ flex: 1 }}>
-                                <span className="t-name" style={{ fontSize: 13, fontWeight: 600 }}>💳 {card.name}</span>
+                                <span className="t-name" style={{ fontSize: 13, fontWeight: 600 }}>💳 {getCategoryLabel(card.name, 'Cartão')}</span>
                                 <span className="t-meta" style={{ fontSize: 10, marginTop: 4 }}>
                                   Vencimento: Dia {card.dueDay} • Fechamento: Dia {card.closingDay}
                                 </span>
@@ -3139,7 +3182,7 @@ function App() {
                             <span>Info:</span> <span className="action-val">{pendingActions[0].description}</span>
                         </div>
                         <div className="action-detail">
-                            <span>Categoria:</span> <span className="action-val">{pendingActions[0].category}</span>
+                            <span>Categoria:</span> <span className="action-val">{getCategoryLabel(pendingActions[0].category)}</span>
                         </div>
                         <div className="action-buttons">
                             <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>
