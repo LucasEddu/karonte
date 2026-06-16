@@ -32,7 +32,12 @@ export const getUserBudgets = async (userId, projectId = null) => {
 
     if (docSnap.exists()) {
       const data = docSnap.data();
-      const { ownerId, projectId: _p, ...budgets } = data;
+      const budgets = {};
+      for (const [key, val] of Object.entries(data)) {
+        if (key === 'ownerId' || key === 'projectId') continue;
+        const num = typeof val === 'number' ? val : parseFloat(val);
+        if (!Number.isNaN(num)) budgets[key] = num;
+      }
       return budgets;
     } else {
       return {}; // No budgets defined yet

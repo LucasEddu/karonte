@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
-import { getUserCategories, saveUserCategories } from './services/categoriesService';
+import { getUserCategories, saveUserCategories, normalizeCategoryList } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
@@ -98,8 +98,8 @@ function App() {
   const DEFAULT_INCOME_CATS  = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
 
   // Merged lists — defaults + custom (no duplicates)
-  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...customCategories.expense])];
-  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...customCategories.income])];
+  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...normalizeCategoryList(customCategories.expense)])];
+  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...normalizeCategoryList(customCategories.income)])];
 
   const chartTheme = useMemo(() => {
     const root = document.documentElement;
