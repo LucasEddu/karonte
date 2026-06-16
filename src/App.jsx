@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense, lazy } from 'react';
 import './App.css';
 import HubView from './components/HubView';
 import TransactionDrawer from './components/TransactionDrawer';
+
+const StatementImportView = lazy(() => import('./components/StatementImportView'));
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
-import { getUserCategories, saveUserCategories } from './services/categoriesService';
+import { getUserCategories, saveUserCategories, normalizeCategoryName, normalizeCategoryList, categoriesMatch } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
@@ -98,8 +100,8 @@ function App() {
   const DEFAULT_INCOME_CATS  = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
 
   // Merged lists — defaults + custom (no duplicates)
-  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...customCategories.expense])];
-  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...customCategories.income])];
+  const expenseCategories = [...new Set([...DEFAULT_EXPENSE_CATS, ...normalizeCategoryList(customCategories.expense)])];
+  const incomeCategories  = [...new Set([...DEFAULT_INCOME_CATS,  ...normalizeCategoryList(customCategories.income)])];
 
   const chartTheme = useMemo(() => {
     const root = document.documentElement;
@@ -441,10 +443,19 @@ function App() {
          } else {
            txs = await getUserTransactions(currentUser.uid, null);
          }
-         setTransactions(txs);
+         const normalizedTxs = txs.map(t => ({
+           ...t,
+           category: normalizeCategoryName(t.category),
+         }));
+         setTransactions(normalizedTxs);
 
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
-         setBudgets(userBudgets);
+         const normalizedBudgets = {};
+         Object.entries(userBudgets).forEach(([key, val]) => {
+           const name = normalizeCategoryName(key);
+           if (name) normalizedBudgets[name] = val;
+         });
+         setBudgets(normalizedBudgets);
 
          const cats = await getUserCategories(currentUser.uid);
          setCustomCategories(cats);
@@ -688,6 +699,14 @@ function App() {
     }
   };
 
+  const handleStatementImport = async (transactionData) => {
+    const createdByName =
+      currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
+    const savedDoc = await addTransaction({ ...transactionData, createdByName }, activeProjectId);
+    setTransactions((prev) => [savedDoc, ...prev]);
+    return savedDoc;
+  };
+
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
     try {
@@ -914,6 +933,11 @@ function App() {
     return getProjectRole(p, currentUser?.uid) || null;
   }, [projects, activeProjectId, currentUser?.uid]);
 
+  const activeProject = useMemo(
+    () => (activeProjectId ? projects.find((p) => p.id === activeProjectId) || null : null),
+    [projects, activeProjectId]
+  );
+
   const canAddToProject = !activeProjectId || activeProjectRole === 'owner' || activeProjectRole === 'add' || activeProjectRole === 'manage';
   const canDeleteInProject = !activeProjectId || activeProjectRole === 'owner' || activeProjectRole === 'manage';
 
@@ -932,10 +956,10 @@ function App() {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     
     return expenseCategories.map(cat => {
-       const total = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
+       const total = expenses.filter(t => categoriesMatch(t.category, cat)).reduce((sum, item) => sum + item.amount, 0);
        return { name: cat, total };
     }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
-  }, [filteredTransactions]);
+  }, [filteredTransactions, expenseCategories]);
 
   const monthlyEvolutionData = useMemo(() => {
     const data = [];
@@ -972,7 +996,7 @@ function App() {
     const expenses = filteredTransactions.filter(t => t.type === 'expense');
     return expenseCategories.map(cat => {
       const limit = budgets[cat] || 0;
-      const spent = expenses.filter(t => t.category === cat).reduce((sum, item) => sum + item.amount, 0);
+      const spent = expenses.filter(t => categoriesMatch(t.category, cat)).reduce((sum, item) => sum + item.amount, 0);
       const percent = limit > 0 ? (spent / limit) * 100 : 0;
       return { name: cat, spent, limit, percent };
     }).filter(item => item.limit > 0).sort((a,b) => b.spent - a.spent);
@@ -995,7 +1019,8 @@ function App() {
     let savingsSpent = 0;
 
     expenses.forEach(t => {
-      const cls = (customCategories.classifications && customCategories.classifications[t.category]) || DEFAULT_CLASSIFICATIONS[t.category] || 'wants';
+      const catName = normalizeCategoryName(t.category);
+      const cls = (customCategories.classifications && customCategories.classifications[catName]) || DEFAULT_CLASSIFICATIONS[catName] || 'wants';
       if (cls === 'needs') {
         needsSpent += t.amount;
       } else if (cls === 'savings') {
@@ -1197,7 +1222,8 @@ function App() {
     // Group by category to find top expense
     const catAnalysis = {};
     monthTransactions.filter(t => t.type === 'expense').forEach(t => {
-       catAnalysis[t.category] = (catAnalysis[t.category] || 0) + t.amount;
+       const catName = normalizeCategoryName(t.category);
+       catAnalysis[catName] = (catAnalysis[catName] || 0) + t.amount;
     });
     
     const sortedCats = Object.entries(catAnalysis).sort((a, b) => b[1] - a[1]);
@@ -2344,6 +2370,11 @@ function App() {
           <a href="#" className={`nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
             <span className="icon">☑</span> Tarefas
           </a>
+          {canAddToProject && (
+            <a href="#" className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
+              <span className="icon">↓</span> Importar
+            </a>
+          )}
         </nav>
 
         {/* DESKTOP USER PROFILE FOOTER */}
@@ -2401,6 +2432,12 @@ function App() {
           <span className="icon">☑</span>
           <span className="label">Tarefas</span>
         </a>
+        {canAddToProject && (
+          <a href="#" className={`mobile-nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
+            <span className="icon">↓</span>
+            <span className="label">Importar</span>
+          </a>
+        )}
       </nav>
 
       {/* MAIN CONTENT AREA */}
@@ -2411,6 +2448,7 @@ function App() {
               {currentView === 'hub' && 'Visão Geral'}
               {currentView === 'budgets' && 'Orçamentos'}
               {currentView === 'tarefas' && 'Tarefas'}
+              {currentView === 'import' && 'Importar Extrato'}
               {currentView === 'userSettings' && 'Configurações de Conta'}
               {currentView === 'projectSettings' && 'Configurações do Projeto'}
             </h2>
@@ -2803,7 +2841,7 @@ function App() {
 
                    <div className="history-list">
                      {expenseCategories.map(cat => {
-                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && t.category === cat).reduce((acc, curr) => acc + curr.amount, 0);
+                        const catSpent = filteredTransactions.filter(t => t.type === 'expense' && categoriesMatch(t.category, cat)).reduce((acc, curr) => acc + curr.amount, 0);
                         const info = getCategoryBudgetInfo(cat, catSpent);
                         const hasBudget = info.limit > 0;
                         const fillCol = info.isOver100 ? 'var(--danger-color)' : getCatFill(0, cat);
@@ -2964,6 +3002,23 @@ function App() {
               )}
             </main>
           )}
+
+        {currentView === 'import' && (
+          <Suspense fallback={<main className="main-content"><div className="card" style={{ padding: '2rem', textAlign: 'center' }}>Carregando importação…</div></main>}>
+            <StatementImportView
+              currentUser={currentUser}
+              activeProjectId={activeProjectId}
+              activeProject={activeProject}
+              transactions={userTransactions}
+              expenseCategories={expenseCategories}
+              incomeCategories={incomeCategories}
+              customCategories={customCategories}
+              canAddToProject={canAddToProject}
+              onImportTransactions={handleStatementImport}
+              formatMoney={formatMoney}
+            />
+          </Suspense>
+        )}
 
         {currentView === 'tarefas' && (
           <main className="main-content">

@@ -1,4 +1,5 @@
 import React from 'react';
+import { normalizeCategoryName } from '../services/categoriesService';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -296,7 +297,7 @@ export default function HubView({
                             ) : null}
                   </span>
                   <span className="t-meta">
-                    <span>{t.category}</span>
+                    <span>{normalizeCategoryName(t.category)}</span>
                     {t.paymentMethod === 'card' && t.cardId && (
                       <>
                         <span> • </span>
