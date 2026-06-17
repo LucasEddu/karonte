@@ -4,22 +4,6 @@ import { normalizeCategories, serializeCategoriesForSave } from '../utils/catego
 
 const COLLECTION = 'userCategories';
 
-/** Aceita string ou objeto legado { id, name } - compativel com importacao PDF e HubView. */
-export const normalizeCategoryName = (cat) => {
-  if (cat == null || cat === '') return '';
-  if (typeof cat === 'string') return cat;
-  if (typeof cat === 'object' && typeof cat.name === 'string') return cat.name;
-  if (typeof cat === 'object' && typeof cat.id === 'string') return cat.id;
-  return String(cat);
-};
-
-export const normalizeCategoryList = (list) => {
-  if (!Array.isArray(list)) return [];
-  return [...new Set(list.map(normalizeCategoryName).filter(Boolean))];
-};
-
-export const categoriesMatch = (a, b) => normalizeCategoryName(a) === normalizeCategoryName(b);
-
 export const getUserCategories = async (uid) => {
   try {
     const snap = await getDoc(doc(db, COLLECTION, uid));
