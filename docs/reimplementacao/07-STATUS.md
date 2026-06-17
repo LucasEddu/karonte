@@ -2,7 +2,7 @@
 
 **Atualizado:** 2026-06-17  
 **Branch:** `master`  
-**Commit de referência:** `647dbbf` — `refactor: reaplicar melhorias locais sobre base com importacao PDF`
+**Fase 3:** 3.2, 3.3, 3.4, 3.5 concluídas (chat, shell, orçamentos v2, modais)
 
 ## Fases 0–12 — Concluídas
 
@@ -25,7 +25,7 @@
 ## Validação
 
 ```bash
-npm run test    # 12 testes
+npm run test    # 21 testes
 npm run build   # PWA + pdfjs chunk separado
 ```
 
@@ -33,10 +33,10 @@ npm run build   # PWA + pdfjs chunk separado
 
 | Métrica | Valor |
 |---------|-------|
-| Linhas `App.jsx` | ~2700 (meta Fase 3: &lt;1500) |
-| Views extraídas | 7 |
-| Hooks | 2 (`usePermissions`, `useFinanceDerived`) |
-| Testes Vitest | 12 |
+| Linhas `App.jsx` | ~1380 (meta Fase 3: &lt;1500) ✅ |
+| Views extraídas | 8 (+ `MainShell`) |
+| Hooks | 3 (`usePermissions`, `useFinanceDerived`, `useChatAssistant`) |
+| Testes Vitest | 21 |
 | Import PDF | Preservado do GitHub + `categoryId` |
 
 ## O que ainda vive no `App.jsx`

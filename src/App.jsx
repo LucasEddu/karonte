@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
 import './App.css';
 import HubView from './components/HubView';
 import TransactionDrawer from './components/TransactionDrawer';
@@ -13,7 +13,7 @@ import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
-import { getUserProjects, createProject, deleteProject, updateProject, addCollaborator, getProjectRole } from './services/projectService';
+import { getUserProjects, createProject, deleteProject, updateProject } from './services/projectService';
 import { getProjectTasks, addTask, updateTask, deleteTask } from './services/taskService';
 import { createInvite, getInvitesByEmail, acceptInvite, rejectInvite } from './services/inviteService';
 import { getNotifications, markNotificationRead } from './services/notificationService';
@@ -23,7 +23,6 @@ import { mergeCategoryNames, getClassificationsByName, createCategoryItem, build
 import { EMPTY_BUDGETS, setBudgetLimit, getBudgetLimitByName } from './utils/budgetModel';
 import { formatMoney, parseMoneyInput } from './utils/money';
 import { getCategoryBudgetInfo, getCardInvoiceStats, getTransactionCategoryLabel } from './utils/financeCalculations';
-import { processChatMessage as parseChatMessage } from './utils/chatParser';
 import { computeParcelaValue, computeParcelasPagas } from './utils/taskCalculations';
 import { usePermissions } from './hooks/usePermissions';
 import { useFinanceDerived } from './hooks/useFinanceDerived';
@@ -33,7 +32,14 @@ import AdminApp from './views/AdminApp';
 import UserSettingsView from './views/UserSettingsView';
 import ProjectSettingsView from './views/ProjectSettingsView';
 import BudgetsView from './views/BudgetsView';
-import TasksView from './views/TasksView';
+import ChatAssistant from './components/ChatAssistant';
+import BudgetModal from './components/modals/BudgetModal';
+import ProjectModal from './components/modals/ProjectModal';
+import DeleteProjectModal from './components/modals/DeleteProjectModal';
+import TaskModal from './components/modals/TaskModal';
+import PaymentModal from './components/modals/PaymentModal';
+import { useChatAssistant } from './hooks/useChatAssistant';
+import MainShell from './views/MainShell';
 
 function App() {
   // --------- STATE: THEME ---------
@@ -137,35 +143,6 @@ function App() {
   const [showTransactionDrawer, setShowTransactionDrawer] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-  // --------- STATE: CHATBOT UI ---------
-  const [chatOpen, setChatOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
-  const recognitionRef = useRef(null);
-  const hasSpeechSupport = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-
-
-  // --------- STATE: DRAGGABLE CHAT FAB ---------
-  const [fabPosition, setFabPosition] = useState(() => {
-    if (typeof window === 'undefined') return { x: 0, y: 0 };
-    try {
-      const stored = localStorage.getItem('karonte_fab_pos');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') return parsed;
-      }
-    } catch {
-      // ignore parse errors
-    }
-    const defaultX = window.innerWidth - 30 - 56; // right: 30px, width: 56px
-    const defaultY = window.innerHeight - 30 - 56; // bottom: 30px, height: 56px
-    return { x: defaultX, y: defaultY };
-  });
-  const [isDraggingFab, setIsDraggingFab] = useState(false);
-  const fabOffsetRef = useRef({ x: 0, y: 0 });
-  const fabButtonRef = useRef(null);
-  const chatWindowRef = useRef(null);
 
   // --------- STATE: PROJECTS / TABS ---------
   const [projects, setProjects] = useState([]);
@@ -280,53 +257,6 @@ function App() {
 
     return () => unsubscribe();
   }, []);
-
-  // Proactive alert for forecast when chat opens
-  useEffect(() => {
-    if (chatOpen && transactions.length > 0) {
-      const forecast = calculateForecast();
-      if (forecast.isHigh) {
-        setTimeout(() => {
-          const alertMsg = `Olá! Notei que seu ritmo de gastos este mês está **${forecast.variationPct.toFixed(0)}% acima** da sua média. Sua previsão de fechamento é de **R$ ${formatMoney(forecast.forecastAmount)}**. Quer ver onde pode economizar?`;
-          setChatMessages(prev => {
-             const last = prev[prev.length - 1];
-             if (last && last.text.includes('ritmo de gastos')) return prev;
-             return [...prev, { id: crypto.randomUUID(), text: alertMsg, sender: 'bot' }];
-          });
-        }, 1000);
-      }
-    }
-  }, [chatOpen, transactions]);
-
-  // Detect month change for Automatic Insight
-  useEffect(() => {
-    if (currentUser && transactions.length > 0 && !dataLoading) {
-      const checkInsight = async () => {
-        const today = new Date();
-        const currentM = today.getMonth() + 1;
-        const currentY = today.getFullYear();
-        const lastCheck = localStorage.getItem(`karonte_last_insight_${currentUser.uid}`);
-        
-        // Se não houver registro ou se o mês/ano mudou
-        if (!lastCheck || lastCheck !== `${currentM}_${currentY}`) {
-          // Precisamos do insight do mês ANTERIOR
-          const prevDate = new Date();
-          prevDate.setMonth(today.getMonth() - 1);
-          const pM = prevDate.getMonth() + 1;
-          const pY = prevDate.getFullYear();
-          
-          const insight = await generateMonthlyInsight(pM, pY);
-          if (insight) {
-            setChatMessages(prev => [...prev, { id: crypto.randomUUID(), text: insight, sender: 'bot' }]);
-            setChatOpen(true);
-            setUnreadCount(prev => prev + 1);
-            localStorage.setItem(`karonte_last_insight_${currentUser.uid}`, `${currentM}_${currentY}`);
-          }
-        }
-      };
-      checkInsight();
-    }
-  }, [currentUser, transactions.length, dataLoading]);
 
   // Fetch user projects
   useEffect(() => {
@@ -729,10 +659,7 @@ function App() {
       const newPaid = currentPaid + amount;
       await updateTask(taskToPay.id, { paidAmount: newPaid });
       setTasks(prev => prev.map(t => t.id === taskToPay.id ? { ...t, paidAmount: newPaid } : t));
-      setShowPaymentModal(false);
-      setTaskToPay(null);
-      setPaymentAmountInput('');
-      setPaymentParcelasInput('');
+      closePaymentModal();
     } catch (err) {
       console.error('Erro ao registrar pagamento:', err);
       alert('Erro ao registrar pagamento.');
@@ -1130,73 +1057,6 @@ function App() {
     }
   };
 
-  // --------- CHATBOT ---------
-  const [chatMessages, setChatMessages] = useState([
-    { id: 'welcome', sender: 'bot', text: 'Olá! Sou seu assistente. Me mande algo como "cinema 50" ou me pergunte "qual meu saldo?".' }
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [pendingActions, setPendingActions] = useState([]); // Array para suportar múltiplos lançamentos
-
-  // --------- EFFECTS: DRAGGABLE CHAT FAB ---------
-  useEffect(() => {
-    if (!isDraggingFab) return;
-
-    const handleMove = (e) => {
-      if (typeof window === 'undefined') return;
-      const clientX = e.clientX;
-      const clientY = e.clientY;
-      if (typeof clientX !== 'number' || typeof clientY !== 'number') return;
-
-      const rawX = clientX - fabOffsetRef.current.x;
-      const rawY = clientY - fabOffsetRef.current.y;
-
-      const maxX = window.innerWidth - 56; // 56 = botão
-      const maxY = window.innerHeight - 56;
-
-      const clamped = {
-        x: Math.min(Math.max(10, rawX), maxX - 10),
-        y: Math.min(Math.max(10, rawY), maxY - 10),
-      };
-
-      setFabPosition(clamped);
-      try {
-        localStorage.setItem('karonte_fab_pos', JSON.stringify(clamped));
-      } catch {
-        // ignore storage errors
-      }
-    };
-
-    const handleUp = () => {
-      setIsDraggingFab(false);
-    };
-
-    window.addEventListener('mousemove', handleMove);
-    window.addEventListener('mouseup', handleUp);
-
-    return () => {
-      window.removeEventListener('mousemove', handleMove);
-      window.removeEventListener('mouseup', handleUp);
-    };
-  }, [isDraggingFab]);
-
-  // Close chat when clicking outside the window (with animation via CSS)
-  useEffect(() => {
-    if (!chatOpen) return;
-
-    const handleClickOutside = (e) => {
-      if (isDraggingFab) return;
-      const chatEl = chatWindowRef.current;
-      const fabEl = fabButtonRef.current;
-      if (!chatEl) return;
-      if (chatEl.contains(e.target)) return;
-      if (fabEl && fabEl.contains(e.target)) return;
-      setChatOpen(false);
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [chatOpen, isDraggingFab]);
-
   const chatContext = useMemo(() => ({
     balance,
     totalExpense,
@@ -1217,278 +1077,46 @@ function App() {
     getCategoryBudgetInfoForCat,
   ]);
 
-  const processChatMessage = (text) => parseChatMessage(text, chatContext);
+  const chatAssistant = useChatAssistant({
+    chatContext,
+    selectedMonth,
+    selectedYear,
+    generateMonthlyInsight,
+    transactions,
+    setTransactions,
+    customCategories,
+    activeProjectId,
+    calculateForecast,
+  });
 
-  const handleChatSubmit = async (e) => {
-    e.preventDefault();
-    const input = chatInput.trim();
-    if (!input) return;
-
-    const normalizedInput = input.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    // 1. Handle Simple Confirm/Cancel for the CURRENT pending action
-    if (pendingActions.length > 0) {
-       if (normalizedInput === 'sim' || normalizedInput === 's') { handleChatConfirm(); return; }
-       if (normalizedInput === 'nao' || normalizedInput === 'n') { handleChatCancel(); return; }
-       
-       // 2. Handle Potential Correction if not Sim/Nao
-       // Improved: try to extract just values/categories first to be less destructive
-       const moneyMatch = normalizedInput.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,3})?)\s?(k|mil)?/);
-       if (moneyMatch) {
-          let valStr = moneyMatch[1].replace(',', '.');
-          let newVal = parseFloat(valStr);
-          if (moneyMatch[2] === 'k' || moneyMatch[2] === 'mil') newVal *= 1000;
-          
-          if (!isNaN(newVal)) {
-            const updated = [...pendingActions];
-            updated[0] = { ...updated[0], amount: newVal };
-            setPendingActions(updated);
-            setChatMessages(prev => [
-              ...prev, 
-              { id: crypto.randomUUID(), sender: 'user', text: input },
-              { id: crypto.randomUUID(), sender: 'bot', text: `Entendi! Alterei o valor para R$ ${formatMoney(newVal)}. Deseja confirmar agora?` }
-            ]);
-            setChatInput('');
-            return;
-          }
-       }
-
-       const correction = processChatMessage(input);
-       if (correction.type === 'action') {
-          const updated = [...pendingActions];
-          updated[0] = { ...updated[0], ...correction.payload };
-          setPendingActions(updated);
-          
-          setChatMessages(prev => [
-            ...prev, 
-            { id: crypto.randomUUID(), sender: 'user', text: input },
-            { id: crypto.randomUUID(), sender: 'bot', text: 'Entendi a correção! Atualizei o resumo abaixo. Deseja confirmar agora?' }
-          ]);
-          setChatInput('');
-          return;
-       }
-    }
-
-    const userMsg = { id: crypto.randomUUID(), sender: 'user', text: input };
-    setChatMessages(prev => [...prev, userMsg]);
-    setChatInput('');
-
-    // 3. Process Multiple Intentions (Split by " e " or ",")
-    const parts = input.split(/\s+e\s+|,\s+/);
-    
-    // Check for Monthly Insight Intent first (as it might be async)
-    // NORMALIZED regex check
-    if (/(resumo de|como foi|resumo do mes)/.test(normalizedInput)) {
-        const monthsMap = {
-          'janeiro': 1, 'fevereiro': 2, 'marco': 3, 'abril': 4, 'maio': 5, 'junho': 6,
-          'julho': 7, 'agosto': 8, 'setembro': 9, 'outubro': 10, 'novembro': 11, 'dezembro': 12
-        };
-        let tM = selectedMonth;
-        let tY = selectedYear;
-
-        Object.keys(monthsMap).forEach(mName => {
-          if (normalizedInput.includes(mName)) tM = monthsMap[mName];
-        });
-
-        if (normalizedInput.includes('mes passado')) {
-          const d = new Date();
-          d.setMonth(d.getMonth() - 1);
-          tM = d.getMonth() + 1;
-          tY = d.getFullYear();
-        }
-
-        const insight = await generateMonthlyInsight(tM, tY);
-        setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: insight }]);
-        if (!chatOpen) setUnreadCount(prev => prev + 1);
-        return;
-    }
-
-    const results = parts.map(p => processChatMessage(p));
-    
-    setTimeout(() => {
-       const answers = results.filter(r => r.type === 'answer');
-       const actions = results.filter(r => r.type === 'action').map(r => r.payload);
-
-       // Show answers if present
-       if (answers.length > 0) {
-          answers.forEach(a => {
-            setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: a.text }]);
-          });
-       }
-
-       // Queue actions
-       if (actions.length > 0) {
-          setPendingActions(prev => [...prev, ...actions]);
-          if (answers.length === 0) {
-             const welcomeMsg = actions.length > 1 
-                ? `Encontrei ${actions.length} registros! Vamos confirmar um por um?`
-                : results.find(r => r.type === 'action').text;
-             setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: welcomeMsg }]);
-          }
-       } else if (answers.length === 0) {
-          // Fallback if nothing was identified
-          setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: 'Não entendi seu pedido. Tente "50 pizza" ou "qual meu saldo?".' }]);
-       }
-
-       if (!chatOpen) setUnreadCount(prev => prev + 1);
-    }, 600);
-  };
-
-  const handleVoiceToggle = () => {
-    if (!hasSpeechSupport) return;
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (isRecording) {
-      recognitionRef.current.stop();
-      setIsRecording(false);
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'pt-BR';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setChatInput('');
-    };
-
-    recognition.onresult = (event) => {
-      const transcript = Array.from(event.results)
-        .map(result => result[0])
-        .map(result => result.transcript)
-        .join('');
-      setChatInput(transcript);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-      // Se tiver algo no input, envia automaticamente
-      if (chatInput.trim()) {
-        const dummyEvent = { preventDefault: () => {} };
-        handleChatSubmit(dummyEvent);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.error("Speech Recognition Error", event.error);
-      setIsRecording(false);
-      if (event.error === 'not-allowed') alert("Permissão de microfone negada.");
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
-  };
+  const { pushBotMessage } = chatAssistant;
 
   useEffect(() => {
-    if (chatOpen) setUnreadCount(0);
-  }, [chatOpen]);
-
-  const handleChatConfirm = async () => {
-     if (pendingActions.length === 0) return;
-     const action = pendingActions[0];
-     
-     // Use the extracted date if available, otherwise fallback to smart period date
-     let dateObj;
-     if (action.date) {
-       dateObj = new Date(action.date);
-     } else {
-       const now = new Date();
-       const isCurrentPeriod = (selectedMonth === now.getMonth() + 1) && (selectedYear === now.getFullYear());
-       dateObj = isCurrentPeriod ? now : new Date(selectedYear, selectedMonth - 1, 1, 12, 0, 0); 
-     }
-
-     const newTransaction = {
-      description: action.description,
-      amount: action.amount,
-      type: action.type,
-      isRecurring: false,
-      date: dateObj.toISOString(),
-      displayDate: dateObj.toLocaleDateString('pt-BR'),
-      ...buildTransactionCategoryFields(action.category, action.type, customCategories),
+    if (!currentUser || transactions.length === 0 || dataLoading) return undefined;
+    const checkInsight = async () => {
+      const today = new Date();
+      const currentM = today.getMonth() + 1;
+      const currentY = today.getFullYear();
+      const lastCheck = localStorage.getItem(`karonte_last_insight_${currentUser.uid}`);
+      if (lastCheck && lastCheck === `${currentM}_${currentY}`) return;
+      const prevDate = new Date();
+      prevDate.setMonth(today.getMonth() - 1);
+      const insight = await generateMonthlyInsight(prevDate.getMonth() + 1, prevDate.getFullYear());
+      if (insight) {
+        pushBotMessage(insight);
+        localStorage.setItem(`karonte_last_insight_${currentUser.uid}`, `${currentM}_${currentY}`);
+      }
     };
-    
-    try {
-      const savedDoc = await addTransaction(newTransaction);
-      setTransactions([savedDoc, ...transactions]);
-      
-      const updatedActions = pendingActions.slice(1);
-      setPendingActions(updatedActions);
-      setChatInput('');
+    checkInsight();
+    return undefined;
+  }, [currentUser, transactions.length, dataLoading, generateMonthlyInsight, pushBotMessage]);
 
-      setChatMessages(prev => [
-         ...prev, 
-         { id: crypto.randomUUID(), sender: 'user', text: 'Sim' }, // Visual feedback
-         { id: crypto.randomUUID(), sender: 'bot', text: updatedActions.length > 0 
-           ? `Registrado! Vamos para o próximo: ${updatedActions[0].description}?` 
-           : `Feito! Registrei ${action.type === 'income' ? 'a receita' : 'a despesa'} com sucesso.` }
-      ]);
-    } catch(err) {
-      console.error('Erro ao registrar via chat:', err);
-      alert('Erro ao registrar via chat');
-    }
+  const closePaymentModal = () => {
+    setShowPaymentModal(false);
+    setTaskToPay(null);
+    setPaymentAmountInput('');
+    setPaymentParcelasInput('');
   };
-
-  const handleChatCancel = () => {
-    if (pendingActions.length === 0) return;
-    const updatedActions = pendingActions.slice(1);
-    setPendingActions(updatedActions);
-    setChatInput('');
-    setChatMessages(prev => [
-       ...prev, 
-       { id: crypto.randomUUID(), sender: 'user', text: 'Não' }, 
-       { id: crypto.randomUUID(), sender: 'bot', text: updatedActions.length > 0 
-         ? `Beleza, pulei esse. E quanto a: ${updatedActions[0].description}?` 
-         : 'Tudo bem, registro cancelado.' }
-    ]);
-  };
-
-  const chatSuggestionClick = (txt) => {
-     if(pendingActions.length > 0) return;
-     setChatInput(txt);
-  };
-
-  const handleFabMouseDown = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDraggingFab(true);
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    fabOffsetRef.current = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
-  };
-
-  const chatWindowStyle = useMemo(() => {
-    if (typeof window === 'undefined') return {};
-
-    const width = 350;
-    const height = 520;
-
-    const fabCenterX = fabPosition.x + 28;
-    const fabCenterY = fabPosition.y + 28;
-
-    let x = fabCenterX - width / 2;
-    let y = fabCenterY - height - 16;
-
-    const maxX = window.innerWidth - width - 10;
-    const maxY = window.innerHeight - height - 10;
-
-    if (x < 10) x = 10;
-    if (x > maxX) x = maxX;
-    if (y < 10) y = 10;
-    if (y > maxY) y = maxY;
-
-    return {
-      left: `${x}px`,
-      top: `${y}px`,
-      transformOrigin: 'center bottom'
-    };
-  }, [fabPosition]);
-
-
 
   // ================= VIEWS =================
 
@@ -1546,411 +1174,53 @@ function App() {
 
   // View: USER MAIN LAYOUT
   return (
-    <div className="app-layout">
-      
-      {/* MOBILE HEADER */}
-      <header className="mobile-header">
-        <button 
-          type="button" 
-          className="mobile-project-btn"
-          onClick={() => setShowProjectDropdown(prev => !prev)}
-        >
-          <span className="mobile-project-avatar">
-            {activeProjectId === null ? 'G' : (projects.find(p => p.id === activeProjectId)?.name || '?').charAt(0).toUpperCase()}
-          </span>
-          <span className="mobile-project-name">
-            {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
-          </span>
-          <span className="mobile-project-arrow">▾</span>
-        </button>
-
-        <div className="mobile-header-actions">
-          {/* Notifications in Mobile Header */}
-          <div className="notifications-wrap">
-            <button
-              type="button"
-              className="notifications-btn"
-              onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
-              title="Notificações"
-            >
-              🔔
-              {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
-            </button>
-            {showNotificationsPanel && (
-              <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
-                <div className="notifications-dropdown-header">Notificações</div>
-                {invites.length === 0 && notifications.length === 0 && (
-                  <div className="notifications-empty">Nenhuma notificação.</div>
-                )}
-                {invites.map(inv => (
-                  <div key={inv.id} className="notification-item notification-invite">
-                    <div className="notification-invite-text">
-                      Convite para o projeto <strong>{inv.projectName}</strong> com acesso <strong>{inv.role === 'view' ? 'somente leitura' : inv.role === 'add' ? 'ver e incluir' : 'ver, incluir e excluir'}</strong>.
-                    </div>
-                    <div className="notification-invite-actions">
-                      <button type="button" className="btn-confirm" onClick={() => handleAcceptInvite(inv)}>Aceitar</button>
-                      <button type="button" className="btn-cancel" onClick={() => handleRejectInvite(inv.id)}>Recusar</button>
-                    </div>
-                  </div>
-                ))}
-                {notifications.filter(n => !n.read).map(n => (
-                  <div key={n.id} className="notification-item">
-                    <span>{n.type === 'invite' ? 'Convite' : n.type}</span>
-                    <button type="button" className="text-btn" onClick={() => markNotificationRead(n.id).then(() => setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x)))}>Marcar lida</button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Profile in Mobile Header */}
-          <button 
-            type="button" 
-            className="mobile-profile-avatar"
-            onClick={() => setShowProfilePopover(prev => !prev)}
-          >
-            {(currentUser.username || currentUser.displayName || currentUser.email || '?').charAt(0).toUpperCase()}
-          </button>
-        </div>
-
-        {/* Floating dropdowns rendered relative to mobile view screen */}
-        {showProjectDropdown && (
-          <div className="project-selector-dropdown mobile-dropdown">
-            <div className="project-selector-dropdown-header">Seus Projetos</div>
-            <div className="project-selector-dropdown-list">
-              <button 
-                type="button"
-                className={`project-selector-item ${activeProjectId === null ? 'active' : ''}`}
-                onClick={() => {
-                  setActiveProjectId(null);
-                  setShowProjectDropdown(false);
-                }}
-              >
-                <span className="project-item-avatar">G</span>
-                <span className="project-item-name">Geral</span>
-              </button>
-              {projects.map(p => {
-                const role = getProjectRole(p, currentUser?.uid);
-                const isOwner = role === 'owner';
-                return (
-                  <div key={p.id} className="project-item-wrapper">
-                    <button 
-                      type="button"
-                      className={`project-selector-item ${activeProjectId === p.id ? 'active' : ''}`}
-                      onClick={() => {
-                        setActiveProjectId(p.id);
-                        setShowProjectDropdown(false);
-                      }}
-                    >
-                      <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
-                      <span className="project-item-name">{p.name}</span>
-                      {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
-                    </button>
-                    {isOwner && (
-                      <button
-                        type="button"
-                        className="project-item-settings-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setProjectSettingsId(p.id);
-                          setCurrentView('projectSettings');
-                          setShowProjectDropdown(false);
-                        }}
-                        title="Configurações do projeto"
-                      >
-                        ⚙
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <button 
-              type="button"
-              className="project-selector-add-btn"
-              onClick={() => {
-                setShowProjectModal(true);
-                setShowProjectDropdown(false);
-              }}
-            >
-              + Novo Projeto
-            </button>
-          </div>
-        )}
-
-        {showProfilePopover && (
-          <div className="profile-popover mobile-dropdown">
-            <div className="profile-popover-header">Sua Conta</div>
-            <div className="profile-popover-user-info">
-              <h4>{currentUser.username || currentUser.displayName || currentUser.email}</h4>
-              <span>{currentUser.email}</span>
-            </div>
-            <div className="profile-popover-divider"></div>
-            <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
-              ⚙ Configurações
-            </div>
-            <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
-              {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
-            </div>
-            <div className="profile-popover-divider"></div>
-            <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
-              🚪 Sair do App
-            </button>
-          </div>
-        )}
-      </header>
-
-      {/* SIDEBAR NAVIGATION (DESKTOP) */}
-      <aside className="sidebar">
-        <div className="sidebar-brand">
-          <img 
-             id="logo"
-             src={theme === 'dark' ? '/karonte-logo-dark.svg' : '/karonte-logo-light.svg'} 
-             alt="Karonte" 
-             style={{height: 32, width: 'auto'}} 
-          />
-        </div>
-
-        {/* DESKTOP PROJECT SELECTOR */}
-        <div className="project-selector-container">
-          <button 
-            type="button" 
-            className="project-selector-btn"
-            onClick={() => setShowProjectDropdown(prev => !prev)}
-          >
-            <div className="project-selector-avatar">
-              {activeProjectId === null ? 'G' : (projects.find(p => p.id === activeProjectId)?.name || '?').charAt(0).toUpperCase()}
-            </div>
-            <div className="project-selector-info">
-              <span className="project-selector-title">Projeto</span>
-              <span className="project-selector-name">
-                {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
-              </span>
-            </div>
-            <span className="project-selector-arrow">▾</span>
-          </button>
-          
-          {showProjectDropdown && (
-            <div className="project-selector-dropdown">
-              <div className="project-selector-dropdown-header">Seus Projetos</div>
-              <div className="project-selector-dropdown-list">
-                <button 
-                  type="button"
-                  className={`project-selector-item ${activeProjectId === null ? 'active' : ''}`}
-                  onClick={() => {
-                    setActiveProjectId(null);
-                    setShowProjectDropdown(false);
-                  }}
-                >
-                  <span className="project-item-avatar">G</span>
-                  <span className="project-item-name">Geral</span>
-                </button>
-                {projects.map(p => {
-                  const role = getProjectRole(p, currentUser?.uid);
-                  const isOwner = role === 'owner';
-                  return (
-                    <div key={p.id} className="project-item-wrapper">
-                      <button 
-                        type="button"
-                        className={`project-selector-item ${activeProjectId === p.id ? 'active' : ''}`}
-                        onClick={() => {
-                          setActiveProjectId(p.id);
-                          setShowProjectDropdown(false);
-                        }}
-                      >
-                        <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
-                        <span className="project-item-name">{p.name}</span>
-                        {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
-                      </button>
-                      {isOwner && (
-                        <button
-                          type="button"
-                          className="project-item-settings-btn"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setProjectSettingsId(p.id);
-                            setCurrentView('projectSettings');
-                            setShowProjectDropdown(false);
-                          }}
-                          title="Configurações do projeto"
-                        >
-                          ⚙
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <button 
-                type="button"
-                className="project-selector-add-btn"
-                onClick={() => {
-                  setShowProjectModal(true);
-                  setShowProjectDropdown(false);
-                }}
-              >
-                + Novo Projeto
-              </button>
-            </div>
-          )}
-        </div>
-        
-        <nav className="sidebar-nav">
-          <a href="#" className={`nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
-            <span className="icon">◈</span> Visão geral
-          </a>
-          <a href="#" className={`nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
-            <span className="icon">○</span> Orçamentos
-          </a>
-          <a href="#" className={`nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
-            <span className="icon">☑</span> Tarefas
-          </a>
-          {canAddToProject && (
-            <a href="#" className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
-              <span className="icon">↓</span> Importar
-            </a>
-          )}
-        </nav>
-
-        {/* DESKTOP USER PROFILE FOOTER */}
-        <div className="sidebar-footer">
-          <div className="user-profile-card" onClick={() => setShowProfilePopover(prev => !prev)}>
-            <div className="avatar">
-              {(currentUser.username || currentUser.displayName || currentUser.email || '?').charAt(0).toUpperCase()}
-            </div>
-            <div className="user-profile-details">
-              <span className="user-profile-name">{currentUser.username || currentUser.displayName || currentUser.email}</span>
-              <span className="user-profile-email">{currentUser.email}</span>
-            </div>
-            <span className="profile-options-trigger">⚙</span>
-          </div>
-
-          {showProfilePopover && (
-            <div className="profile-popover">
-              <div className="profile-popover-header">Sua Conta</div>
-              <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
-                ⚙ Configurações
-              </div>
-              <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
-                {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
-              </div>
-              <div className="profile-popover-divider"></div>
-              <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
-                🚪 Sair do App
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      {/* MOBILE BOTTOM NAVIGATION BAR */}
-      <nav className="mobile-bottom-nav">
-        <a href="#" className={`mobile-nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
-          <span className="icon">◈</span>
-          <span className="label">Início</span>
-        </a>
-        {canAddToProject && (
-          <button
-            type="button"
-            className="mobile-nav-fab"
-            onClick={() => setShowTransactionDrawer(true)}
-            aria-label="Novo lançamento"
-          >
-            +
-          </button>
-        )}
-        <a href="#" className={`mobile-nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
-          <span className="icon">○</span>
-          <span className="label">Orçamento</span>
-        </a>
-        <a href="#" className={`mobile-nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
-          <span className="icon">☑</span>
-          <span className="label">Tarefas</span>
-        </a>
-        {canAddToProject && (
-          <a href="#" className={`mobile-nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
-            <span className="icon">↓</span>
-            <span className="label">Importar</span>
-          </a>
-        )}
-      </nav>
-
-      {/* MAIN CONTENT AREA */}
-      <div className="content-wrapper">
-        <header className="top-bar">
-          <div className="page-context">
-            <h2 className="page-title">
-              {currentView === 'hub' && 'Visão Geral'}
-              {currentView === 'budgets' && 'Orçamentos'}
-              {currentView === 'tarefas' && 'Tarefas'}
-              {currentView === 'import' && 'Importar Extrato'}
-              {currentView === 'userSettings' && 'Configurações de Conta'}
-              {currentView === 'projectSettings' && 'Configurações do Projeto'}
-            </h2>
-            {activeProjectId !== null && (
-              <span className="project-badge">
-                {(projects.find(p => p.id === activeProjectId)?.name || '')}
-              </span>
-            )}
-          </div>
-
-          <div className="top-actions">
-            <div className="period-filter">
-               <select className="month-select" value={selectedMonth} onChange={e => setSelectedMonth(Number(e.target.value))}>
-                 {Array.from({length: 12}, (_, i) => i + 1).map(m => (
-                   <option key={m} value={m}>{new Date(2000, m-1, 1).toLocaleString('pt-BR', {month: 'short'}).toUpperCase()}</option>
-                 ))}
-               </select>
-               <select className="year-select" value={selectedYear} onChange={e => setSelectedYear(Number(e.target.value))}>
-                  <option value={new Date().getFullYear()}>{new Date().getFullYear()}</option>
-                  <option value={new Date().getFullYear() - 1}>{new Date().getFullYear() - 1}</option>
-               </select>
-            </div>
-            {filteredTransactions.length > 0 ? (
-               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relatório</button>
-            ) : null}
-            <div className="divider"></div>
-            
-            {/* DESKTOP NOTIFICATIONS BELL */}
-            <div className="notifications-wrap desktop-only">
-              <button
-                type="button"
-                className="notifications-btn"
-                onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
-                title="Notificações"
-              >
-                🔔
-                {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
-              </button>
-              {showNotificationsPanel && (
-                <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <div className="notifications-dropdown-header">Notificações</div>
-                  {invites.length === 0 && notifications.length === 0 && (
-                    <div className="notifications-empty">Nenhuma notificação.</div>
-                  )}
-                  {invites.map(inv => (
-                    <div key={inv.id} className="notification-item notification-invite">
-                      <div className="notification-invite-text">
-                        Convite para o projeto <strong>{inv.projectName}</strong> com acesso <strong>{inv.role === 'view' ? 'somente leitura' : inv.role === 'add' ? 'ver e incluir' : 'ver, incluir e excluir'}</strong>.
-                      </div>
-                      <div className="notification-invite-actions">
-                        <button type="button" className="btn-confirm" onClick={() => handleAcceptInvite(inv)}>Aceitar</button>
-                        <button type="button" className="btn-cancel" onClick={() => handleRejectInvite(inv.id)}>Recusar</button>
-                      </div>
-                    </div>
-                  ))}
-                  {notifications.filter(n => !n.read).map(n => (
-                    <div key={n.id} className="notification-item">
-                      <span>{n.type === 'invite' ? 'Convite' : n.type}</span>
-                      <button type="button" className="text-btn" onClick={() => markNotificationRead(n.id).then(() => setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x)))}>Marcar lida</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </header>
-
+    <>
+      <MainShell
+        theme={theme}
+        currentUser={currentUser}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        activeProjectName={activeProject?.name}
+        currentView={currentView}
+        canAddToProject={canAddToProject}
+        showProjectDropdown={showProjectDropdown}
+        onToggleProjectDropdown={() => setShowProjectDropdown((prev) => !prev)}
+        onSelectProject={(id) => {
+          setActiveProjectId(id);
+          setShowProjectDropdown(false);
+        }}
+        onOpenProjectSettings={(projectId) => {
+          setProjectSettingsId(projectId);
+          setCurrentView('projectSettings');
+          setShowProjectDropdown(false);
+        }}
+        onNewProject={() => {
+          setShowProjectModal(true);
+          setShowProjectDropdown(false);
+        }}
+        showProfilePopover={showProfilePopover}
+        onToggleProfilePopover={(value) => {
+          if (typeof value === 'boolean') setShowProfilePopover(value);
+          else setShowProfilePopover((prev) => !prev);
+        }}
+        onNavigate={setCurrentView}
+        onOpenTransactionDrawer={() => setShowTransactionDrawer(true)}
+        onLogout={handleLogout}
+        onToggleTheme={toggleTheme}
+        invites={invites}
+        notifications={notifications}
+        showNotificationsPanel={showNotificationsPanel}
+        onToggleNotificationsPanel={() => setShowNotificationsPanel((prev) => !prev)}
+        onAcceptInvite={handleAcceptInvite}
+        onRejectInvite={handleRejectInvite}
+        onMarkNotificationRead={(id) => markNotificationRead(id).then(() => setNotifications((prev) => prev.map((x) => (x.id === id ? { ...x, read: true } : x))))}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        onMonthChange={setSelectedMonth}
+        onYearChange={setSelectedYear}
+        hasExportableTransactions={filteredTransactions.length > 0}
+        onExportCSV={exportToCSV}
+      >
         {currentView === 'userSettings' && (
           <UserSettingsView currentUser={currentUser} onBack={() => setCurrentView('hub')} />
         )}
@@ -2122,136 +1392,19 @@ function App() {
             onOpenPaymentModal={openPaymentModal}
             onDeleteTask={handleDeleteTask}
           />
-        )}
+        )}      </MainShell>
 
-      </div>
+      <ChatAssistant {...chatAssistant} />
 
-      {!chatOpen && (
-        <button
-          className={`chat-fab ${unreadCount > 0 ? 'has-unread' : ''}`}
-          onClick={() => { if (!isDraggingFab) setChatOpen(true); }}
-          onMouseDown={handleFabMouseDown}
-          ref={fabButtonRef}
-          style={{ left: `${fabPosition.x}px`, top: `${fabPosition.y}px` }}
-        >
-          <img src="/karonte-favicon-light.svg" alt="Karonte" className="fab-icon-img" />
-          {unreadCount > 0 ? <span className="fab-badge">{unreadCount}</span> : null}
-        </button>
-      )}
+      <BudgetModal
+        open={budgetModalOpen}
+        categoryName={activeBudgetCat}
+        value={budgetInputValue}
+        onValueChange={setBudgetInputValue}
+        onClose={() => setBudgetModalOpen(false)}
+        onConfirm={handleConfirmBudget}
+      />
 
-      <aside
-        className={`chatbot-float-window ${chatOpen ? 'open' : ''}`}
-        ref={chatWindowRef}
-        style={chatWindowStyle}
-      >
-          <div className="chat-header">
-            <div style={{display:'flex', alignItems:'center', gap: 10}}>
-              <div className="bot-avatar">
-                <img src="/karonte-favicon-light.svg" alt="K" />
-              </div>
-              <div className="bot-info">
-                  <span className="bot-name">Karonte</span>
-                  <span className="bot-status">Online</span>
-              </div>
-            </div>
-            <button className="chat-close-btn" onClick={() => setChatOpen(false)}>×</button>
-          </div>
-          
-          <div className="chat-messages">
-            {chatMessages.map(msg => (
-                <div key={msg.id} style={{display: 'flex', flexDirection: 'column'}}>
-                  <div className={`chat-bubble ${msg.sender}`}>
-                      {msg.text}
-                  </div>
-                  
-                  {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
-                    {(msg.sender === 'bot' && pendingActions.length > 0 && chatMessages[chatMessages.length - 1].id === msg.id && (msg.text.includes('Deseja registrar') || msg.text.includes('Vamos para o próximo') || msg.text.includes('Entendi a correção'))) ? (
-                      <div className="chat-action-card">
-                        <div className="action-title">Resumo Extraído</div>
-                        <div className="action-detail">
-                            <span>Tipo:</span> <span className="action-val" style={{color: pendingActions[0].type === 'expense' ? 'var(--danger-color)' : 'var(--success-color)'}}>{pendingActions[0].type === 'income' ? 'Receita' : 'Despesa'}</span>
-                        </div>
-                        <div className="action-detail">
-                            <span>Valor:</span> <span className="action-val">R$ {formatMoney(pendingActions[0].amount)}</span>
-                        </div>
-                        <div className="action-detail">
-                            <span>Info:</span> <span className="action-val">{pendingActions[0].description}</span>
-                        </div>
-                        <div className="action-detail">
-                            <span>Categoria:</span> <span className="action-val">{pendingActions[0].category}</span>
-                        </div>
-                        <div className="action-buttons">
-                            <button className="btn-confirm" onClick={handleChatConfirm}>Confirmar</button>
-                            <button className="btn-cancel" onClick={handleChatCancel}>Cancelar</button>
-                        </div>
-                      </div>
-                  ) : null}
-                </div>
-            ))}
-          </div>
-
-          <div className="chat-input-area">
-            <div className="chat-suggestions">
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>🍟 50 ifood</div>
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>🚗 90 uber</div>
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>📊 Qual meu saldo?</div>
-            </div>
-            <form onSubmit={handleChatSubmit} className="chat-form">
-                <input 
-                  type="text" 
-                  className="chat-input" 
-                  placeholder={pendingActions.length > 0 ? "Sim ou Não..." : "Ex: 120 da academia"}
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                />
-                <button 
-                   type="button" 
-                   className={`chat-voice-btn ${isRecording ? 'recording' : ''}`}
-                   onClick={handleVoiceToggle}
-                   title={hasSpeechSupport ? "Comando de Voz" : "Seu navegador não suporta reconhecimento de voz da Web API."}
-                   disabled={!hasSpeechSupport}
-                   style={!hasSpeechSupport ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-                >
-                  🎙️
-                </button>
-                <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
-                  ↑
-                </button>
-            </form>
-          </div>
-      </aside>
-
-      {/* BUDGET MODAL */}
-      {budgetModalOpen && (
-        <div className="modal-overlay" onClick={() => setBudgetModalOpen(false)}>
-           <div className="budget-modal-card" onClick={e => e.stopPropagation()}>
-              <div className="modal-header">
-                 <h3>Limite para {activeBudgetCat}</h3>
-                 <button className="chat-close-btn" onClick={() => setBudgetModalOpen(false)}>×</button>
-              </div>
-              <div className="modal-body">
-                 <p className="modal-subtitle">Defina o teto de gastos mensal para esta categoria.</p>
-                 <div className="budget-input-wrapper">
-                    <span className="currency-prefix">R$</span>
-                    <input 
-                      type="number" 
-                      step="0.01" 
-                      placeholder="0,00" 
-                      className="budget-main-input"
-                      value={budgetInputValue}
-                      onChange={e => setBudgetInputValue(e.target.value)}
-                      autoFocus
-                    />
-                 </div>
-                 <p className="modal-hint">Digite 0 para remover o limite.</p>
-              </div>
-              <div className="modal-footer">
-                 <button className="btn-secondary" onClick={() => setBudgetModalOpen(false)}>Cancelar</button>
-                 <button className="btn-confirm" onClick={handleConfirmBudget}>Salvar Limite</button>
-              </div>
-           </div>
-        </div>
-      )}
       <TransactionDrawer
         open={showTransactionDrawer}
         onClose={() => setShowTransactionDrawer(false)}
@@ -2294,217 +1447,56 @@ function App() {
         canEditCategories={canEditCategories}
       />
 
-      {/* NEW PROJECT MODAL */}
-      {showProjectModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <div className="modal-header">
-              <h2>Novo Projeto Orçamentário</h2>
-              <button className="close-btn" onClick={() => setShowProjectModal(false)}>✕</button>
-            </div>
-            <p className="modal-subtitle">
-              Crie projetos para gerenciar orçamentos separados (ex: "Construção da Casa", "Casamento 2025").
-            </p>
-            
-            <div className="form-group">
-              <label>Nome do Projeto</label>
-              <input 
-                 type="text" 
-                 value={newProjectName} 
-                 onChange={e => setNewProjectName(e.target.value)} 
-                 placeholder="Digite o nome..." 
-                 autoFocus
-              />
-            </div>
-            
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setShowProjectModal(false)}>Cancelar</button>
-              <button className="submit-btn" onClick={handleCreateProject}>Criar Projeto</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ProjectModal
+        open={showProjectModal}
+        projectName={newProjectName}
+        onProjectNameChange={setNewProjectName}
+        onClose={() => setShowProjectModal(false)}
+        onConfirm={handleCreateProject}
+      />
 
-      {/* CONFIRMAÇÃO EXCLUSÃO PROJETO */}
-      {projectToDelete && (
-        <div className="modal-overlay" onClick={() => setProjectToDelete(null)}>
-          <div className="modal-content modal-confirm" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Excluir projeto</h2>
-              <button className="close-btn" onClick={() => setProjectToDelete(null)}>✕</button>
-            </div>
-            <p className="modal-subtitle">Tem certeza que deseja excluir o projeto &quot;{projectToDelete.name}&quot;? Esta ação não pode ser desfeita.</p>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setProjectToDelete(null)}>Cancelar</button>
-              <button className="submit-btn" style={{ background: 'var(--danger-color)' }} onClick={handleConfirmDeleteProject}>Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DeleteProjectModal
+        project={projectToDelete}
+        onClose={() => setProjectToDelete(null)}
+        onConfirm={handleConfirmDeleteProject}
+      />
 
-      {/* MODAL TAREFA (adicionar / editar) */}
-      {showTaskModal && (
-        <div className="modal-overlay" onClick={closeTaskModal}>
-          <div className="modal-content modal-task" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>{taskEditId ? 'Editar tarefa' : 'Nova tarefa'}</h2>
-              <button className="close-btn" onClick={closeTaskModal}>✕</button>
-            </div>
-            <div className="form-group">
-              <label>Descrição da tarefa</label>
-              <input
-                type="text"
-                value={taskTitleInput}
-                onChange={e => setTaskTitleInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTask(); } }}
-                placeholder="Ex: Conta de luz, Empréstimo"
-                autoFocus
-              />
-            </div>
-            <div className="form-group">
-              <label>Tipo</label>
-              <select value={taskTypeInput} onChange={e => setTaskTypeInput(e.target.value)}>
-                <option value="tarefa">Tarefa</option>
-                <option value="despesa">Despesa / Dívida</option>
-              </select>
-            </div>
-            {taskTypeInput === 'despesa' && (
-              <>
-                <div className="form-group">
-                  <label>Valor total (R$)</label>
-                  <input
-                    type="text"
-                    value={taskMetaValueInput}
-                    onChange={e => handleTaskMoneyInput(e, setTaskMetaValueInput)}
-                    placeholder="0,00"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Valor da parcela (R$) (opcional)</label>
-                  <input
-                    type="text"
-                    value={taskParcelaValueInput}
-                    onChange={e => handleTaskMoneyInput(e, setTaskParcelaValueInput)}
-                    placeholder="0,00"
-                  />
-                  {(parseInt(taskParcelasInput, 10) || 0) > 0 && parseMoneyInput(taskParcelaValueInput) > 0 ? (
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                      Total calculado: R$ {formatMoney((parseInt(taskParcelasInput, 10) || 0) * parseMoneyInput(taskParcelaValueInput))}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="form-group">
-                  <label>Número de parcelas (opcional)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={taskParcelasInput}
-                    onChange={e => setTaskParcelasInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    placeholder="Ex: 12"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Parcelas já pagas (opcional)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={taskParcelasPaidInput}
-                    onChange={e => setTaskParcelasPaidInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    placeholder="Ex: 3"
-                  />
-                  {parseMoneyInput(taskParcelaValueInput) > 0 && (parseInt(taskParcelasPaidInput, 10) || 0) > 0 ? (
-                    <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-                      Abatimento calculado: R$ {formatMoney(Math.min(parseInt(taskParcelasPaidInput, 10) || 0, parseInt(taskParcelasInput, 10) || 0) * parseMoneyInput(taskParcelaValueInput))}
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            )}
-            {taskTypeInput === 'tarefa' && (
-              <div className="form-group">
-                <label>Valor meta (R$), opcional</label>
-                <input
-                  type="text"
-                  value={taskMetaValueInput}
-                  onChange={e => handleTaskMoneyInput(e, setTaskMetaValueInput)}
-                  placeholder="0,00"
-                />
-              </div>
-            )}
-            <div className="modal-actions">
-              <button type="button" className="btn-secondary" onClick={closeTaskModal}>Cancelar</button>
-              <button type="button" className="submit-btn" onClick={handleSaveTask} disabled={taskSaving || !taskTitleInput.trim()}>{taskSaving ? '...' : (taskEditId ? 'Salvar' : 'Adicionar')}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <TaskModal
+        open={showTaskModal}
+        isEdit={!!taskEditId}
+        title={taskTitleInput}
+        type={taskTypeInput}
+        metaValue={taskMetaValueInput}
+        parcelaValue={taskParcelaValueInput}
+        parcelas={taskParcelasInput}
+        parcelasPaid={taskParcelasPaidInput}
+        saving={taskSaving}
+        onTitleChange={setTaskTitleInput}
+        onTypeChange={setTaskTypeInput}
+        onMetaValueChange={setTaskMetaValueInput}
+        onParcelaValueChange={setTaskParcelaValueInput}
+        onParcelasChange={setTaskParcelasInput}
+        onParcelasPaidChange={setTaskParcelasPaidInput}
+        onMoneyInput={handleTaskMoneyInput}
+        onClose={closeTaskModal}
+        onSave={handleSaveTask}
+      />
 
-      {/* MODAL REGISTRAR PAGAMENTO (abater dívida) */}
-      {showPaymentModal && taskToPay && (
-        <div className="modal-overlay" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Registrar pagamento</h2>
-              <button className="close-btn" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>✕</button>
-            </div>
-            <p className="modal-subtitle">Abater valor em &quot;{taskToPay.title}&quot;. Valor pago até agora: R$ {formatMoney(Number(taskToPay.paidAmount) || 0)} de R$ {formatMoney(Number(taskToPay.metaValue) || 0)}.</p>
-            <div className="form-group">
-              <label>Modo de abatimento</label>
-              <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)}>
-                <option value="valor">Por valor</option>
-                <option value="parcelas">Por parcelas</option>
-              </select>
-            </div>
-            <div className="form-group">
-              {paymentMode === 'parcelas' ? (
-                <>
-                  <label>Parcelas pagas agora</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={paymentParcelasInput}
-                    onChange={e => setPaymentParcelasInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    placeholder="Ex: 1"
-                    autoFocus
-                  />
-                  {(() => {
-                    const meta = Number(taskToPay.metaValue) || 0;
-                    const parcelas = Number(taskToPay.parcelas) || 0;
-                    const parcelaValue = (meta > 0 && parcelas > 0) ? (meta / parcelas) : 0;
-                    const n = parseInt(paymentParcelasInput, 10) || 0;
-                    return (parcelaValue > 0 && n > 0)
-                      ? <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>Valor abatido: R$ {formatMoney(n * parcelaValue)}</div>
-                      : (parcelas <= 0 ? <div style={{ fontSize: 11, color: 'var(--danger-color)', marginTop: 4 }}>Esta despesa não tem parcelas definidas.</div> : null);
-                  })()}
-                </>
-              ) : (
-                <>
-                  <label>Valor a abater (R$)</label>
-                  <input
-                    type="text"
-                    value={paymentAmountInput}
-                    onChange={e => handleTaskMoneyInput(e, setPaymentAmountInput)}
-                    placeholder="0,00"
-                    autoFocus
-                  />
-                </>
-              )}
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn-secondary" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>Cancelar</button>
-              <button
-                type="button"
-                className="submit-btn"
-                onClick={handleAddPayment}
-                disabled={paymentSaving || (paymentMode === 'parcelas' ? (parseInt(paymentParcelasInput, 10) || 0) <= 0 : parseMoneyInput(paymentAmountInput) <= 0)}
-              >
-                {paymentSaving ? '...' : 'Registrar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <PaymentModal
+        open={showPaymentModal}
+        task={taskToPay}
+        mode={paymentMode}
+        amountInput={paymentAmountInput}
+        parcelasInput={paymentParcelasInput}
+        saving={paymentSaving}
+        onModeChange={setPaymentMode}
+        onAmountChange={setPaymentAmountInput}
+        onParcelasInputChange={setPaymentParcelasInput}
+        onMoneyInput={handleTaskMoneyInput}
+        onClose={closePaymentModal}
+        onConfirm={handleAddPayment}
+      />
+    </>
   );
 }
 

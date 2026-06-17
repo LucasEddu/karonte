@@ -12,26 +12,31 @@ Removidos de `App.jsx` (2026-06-17):
 
 **Critério de aceite:** build e testes passam; convite/rename no projeto continuam na tela de configurações.
 
-## 3.2 Extrair chat assistente (médio risco) — parcial ✅
+## 3.2 Extrair chat assistente (médio risco) — concluída ✅
 
 | Novo arquivo | Status |
 |--------------|--------|
-| `src/utils/chatParser.js` | ✅ `processChatMessage` extraído |
-| `src/hooks/useChatAssistant.js` | pendente |
-| `src/components/ChatAssistant.jsx` | pendente |
+| `src/utils/chatParser.js` | ✅ |
+| `src/hooks/useChatAssistant.js` | ✅ |
+| `src/components/ChatAssistant.jsx` | ✅ |
 
-**Touchpoints no App:** passar `balance`, `categoryStats`, `customCategories`, `onConfirmTransaction`.
+## 3.3 Shell de layout (médio risco) — concluída ✅
 
-**Critério de aceite:** comandos "cinema 50", "qual meu saldo?", voz e confirmação continuam iguais.
+| Novo arquivo | Status |
+|--------------|--------|
+| `src/views/MainShell.jsx` | ✅ sidebar, header mobile, nav, top-bar |
+| `src/components/ProjectSelectorDropdown.jsx` | ✅ |
+| `src/components/NotificationsDropdown.jsx` | ✅ |
 
-## 3.3 Shell de layout (médio risco)
+## 3.5 Modais como views (baixo/médio) — concluída ✅
 
-| Novo arquivo | Responsabilidade |
-|--------------|------------------|
-| `src/views/MainShell.jsx` | Sidebar, mobile header/nav, top-bar, `children` |
-| `src/views/HubShell.jsx` | Opcional: mover `HubView` para `views/` |
-
-**Critério de aceite:** navegação entre hub, orçamentos, tarefas, import inalterada.
+| View | Status |
+|------|--------|
+| `modals/TaskModal.jsx` | ✅ |
+| `modals/PaymentModal.jsx` | ✅ |
+| `modals/ProjectModal.jsx` | ✅ |
+| `modals/BudgetModal.jsx` | ✅ |
+| `modals/DeleteProjectModal.jsx` | ✅ |
 
 ## 3.4 Orçamentos com `categoryId` (médio/alto risco) — concluída ✅
 
@@ -59,12 +64,7 @@ Meta:
 
 ## 3.5 Modais como views (baixo/médio)
 
-| View | Substitui |
-|------|-----------|
-| `TaskModal.jsx` | Modal tarefa em `App.jsx` |
-| `PaymentModal.jsx` | Abatimento de despesa |
-| `ProjectModal.jsx` | Criar projeto |
-| `BudgetModal.jsx` | Definir limite |
+_Removido — ver seção concluída acima._
 
 ## 3.6 Domínio e infra (futuro)
 
