@@ -15,6 +15,8 @@ Consulte **[DOCUMENTACAO.md](./DOCUMENTACAO.md)** para a referência completa do
 - Cálculos e fórmulas (orçamentos, previsão, 50-30-20, parcelas, cartões)
 - Serviços, permissões, chatbot, PWA e deploy
 
+**Reimplementação / roadmap técnico:** [`docs/reimplementacao/`](./docs/reimplementacao/) — status em [07-STATUS.md](./docs/reimplementacao/07-STATUS.md), próximas fases em [08-FASE-3.md](./docs/reimplementacao/08-FASE-3.md).
+
 ## Desenvolvimento local
 
 ```bash

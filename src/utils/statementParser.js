@@ -1,5 +1,4 @@
-const DEFAULT_EXPENSE_CATS = ['Moradia', 'Alimentação', 'Lazer', 'Transporte', 'Saúde', 'Outros'];
-const DEFAULT_INCOME_CATS = ['Salário', 'Investimentos', 'Freelance', 'Outros'];
+import { inferCategory } from './categoryDetection.js';
 
 const EXPENSE_KEYWORDS = [
   'debito', 'débito', 'compra', 'pagamento', 'pix enviado', 'envio pix', 'enviado',
@@ -11,18 +10,6 @@ const INCOME_KEYWORDS = [
   'credito', 'crédito', 'pix recebido', 'recebimento pix', 'recebido', 'salario', 'salário',
   'estorno', 'rendimento', 'deposito', 'depósito', 'ted recebida', 'doc recebida',
   'transferencia recebida', 'transferência recebida', 'resgate',
-];
-
-const CATEGORY_RULES = [
-  { cats: ['Alimentação'], patterns: /mercado|supermercado|atacad[aã]o|assai|assa[ií]|s[aã]o\s*luiz|carrefour|p[aã]o\s*de\s*a[cç][uú]car|extra\s|hortifruti|padaria/i },
-  { cats: ['Transporte'], patterns: /uber|99\s|99pay|combust[ií]vel|gasolina|posto|estacionamento|ped[aá]gio|onibus|[ôo]nibus|metro|metr[ôo]|ipva|detran/i },
-  { cats: ['Saúde'], patterns: /farm[aá]cia|drogaria|cl[ií]nica|consulta|hospital|laborat[oó]rio|dentista|plano\s*de\s*sa[uú]de/i },
-  { cats: ['Lazer'], patterns: /netflix|spotify|cinema|show|teatro|steam|playstation|xbox|ingresso|lazer|disney/i },
-  { cats: ['Alimentação'], patterns: /ifood|rappi|restaurante|lanchonete|pizzaria|burger|caf[eé]|bar\s/i },
-  { cats: ['Moradia'], patterns: /aluguel|energia|eletric|luz\s|agua|[áa]gua|internet|condom[ií]nio|iptu|alug/i },
-  { cats: ['Salário'], patterns: /sal[aá]rio|folha\s*de\s*pagamento|pro[\s-]?labore/i, type: 'income' },
-  { cats: ['Investimentos'], patterns: /rendimento|dividendo|juros\s*sobre|aplica[cç][aã]o|cdb|lci|lca/i, type: 'income' },
-  { cats: ['Freelance'], patterns: /freelance|freela|honor[aá]rio/i, type: 'income' },
 ];
 
 const MONEY_PATTERN = /(?:R\$\s*)?[-+]?\s*\(?\s*(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})\s*\)?/gi;
@@ -92,31 +79,7 @@ export const detectTransactionType = (line, amountStr = '') => {
   return 'expense';
 };
 
-export const detectCategory = (description, type, customCategories = {}) => {
-  const expenseList = [
-    ...DEFAULT_EXPENSE_CATS,
-    ...(customCategories.expense || []),
-  ];
-  const incomeList = [
-    ...DEFAULT_INCOME_CATS,
-    ...(customCategories.income || []),
-  ];
-
-  const desc = String(description || '');
-
-  for (const rule of CATEGORY_RULES) {
-    if (rule.type && rule.type !== type) continue;
-    if (rule.patterns.test(desc)) {
-      const cat = rule.cats[0];
-      if (type === 'income' && incomeList.includes(cat)) return cat;
-      if (type === 'expense' && expenseList.includes(cat)) return cat;
-      if (type === 'income') return incomeList.includes(cat) ? cat : 'Outros';
-      return expenseList.includes(cat) ? cat : 'Outros';
-    }
-  }
-
-  return type === 'income' ? 'Outros' : 'Outros';
-};
+export const detectCategory = inferCategory;
 
 export const createTransactionHash = (transaction) => {
   const dateKey =

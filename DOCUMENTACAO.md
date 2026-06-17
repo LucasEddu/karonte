@@ -1107,18 +1107,21 @@ Arquivo: `.env.local` (não versionado)
 
 ### Pendente (Fase 3+)
 
+Roadmap detalhado: [`docs/reimplementacao/08-FASE-3.md`](docs/reimplementacao/08-FASE-3.md)  
+Status: [`docs/reimplementacao/07-STATUS.md`](docs/reimplementacao/07-STATUS.md)
+
 | Item | Status |
 |------|--------|
-| Extrair chat/modais para hooks ou views | `useChatAssistant`, `useTransactions`, etc. |
-| `categoryId` em orçamentos | Ainda mapa `{ categoria: valor }` |
-| Orçamentos como estrutura auditável | Pendente |
-| Centralizar `notifications` | Serviço existe, UI usa `invites` direto |
-| `dueDate` em tarefas | Não implementado |
-| Export PDF/Excel | Apenas CSV |
-| Cloud Functions para recorrências | Job no login (cliente) por enquanto |
-| Remover modais mortos | `inviteModalProject`, `projectToRename` |
-| Sentry / Analytics | Não integrado |
-| iOS Capacitor / remover `server.url` dev | Pendente |
+| Extrair chat/modais para hooks ou views | `useChatAssistant` — pendente (3.2) |
+| `categoryId` em orçamentos | Pendente (3.4) |
+| Orçamentos como estrutura auditável | Pendente (3.4) |
+| Centralizar `notifications` | Pendente (3.6) |
+| `dueDate` em tarefas | Pendente (3.6) |
+| Export PDF/Excel | Pendente (3.6) |
+| Cloud Functions para recorrências | Pendente (3.6) |
+| ~~Remover modais mortos~~ | ✅ Concluído (3.1) |
+| Sentry / Analytics | Pendente (3.6) |
+| iOS Capacitor / remover `server.url` dev | Pendente (3.6) |
 
 ### Estrutura atual de `src/`
 

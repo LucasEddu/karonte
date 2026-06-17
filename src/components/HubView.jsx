@@ -1,5 +1,5 @@
 import React from 'react';
-import { normalizeCategoryName } from '../services/categoriesService';
+import { getTransactionCategoryLabel } from '../utils/financeCalculations';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -297,7 +297,7 @@ export default function HubView({
                             ) : null}
                   </span>
                   <span className="t-meta">
-                    <span>{normalizeCategoryName(t.category)}</span>
+                    <span>{getTransactionCategoryLabel(t)}</span>
                     {t.paymentMethod === 'card' && t.cardId && (
                       <>
                         <span> • </span>

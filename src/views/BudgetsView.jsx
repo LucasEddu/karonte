@@ -1,3 +1,5 @@
+import { getTransactionCategoryLabel } from '../utils/financeCalculations';
+
 export default function BudgetsView({
   budgetsSubTab,
   onSubTabChange,
@@ -76,7 +78,7 @@ export default function BudgetsView({
           <div className="history-list">
             {expenseCategories.map((cat) => {
               const catSpent = filteredTransactions
-                .filter((t) => t.type === 'expense' && (t.categoryName || t.category) === cat)
+                .filter((t) => t.type === 'expense' && getTransactionCategoryLabel(t) === cat)
                 .reduce((acc, curr) => acc + curr.amount, 0);
               const info = getCategoryBudgetInfo(cat, catSpent);
               const hasBudget = info.limit > 0;

@@ -21,7 +21,8 @@ import { persistMissingRecurrences } from './services/recurrenceService';
 import { DEFAULT_EXPENSE_CATS, DEFAULT_INCOME_CATS } from './constants/categories';
 import { mergeCategoryNames, getClassificationsByName, createCategoryItem, buildTransactionCategoryFields } from './utils/categoryModel';
 import { formatMoney, parseMoneyInput } from './utils/money';
-import { getCategoryBudgetInfo, getCardInvoiceStats } from './utils/financeCalculations';
+import { getCategoryBudgetInfo, getCardInvoiceStats, getTransactionCategoryLabel } from './utils/financeCalculations';
+import { inferCategory as inferCategoryFromText, findCustomCategoryInText } from './utils/categoryDetection';
 import { computeParcelaValue, computeParcelasPagas } from './utils/taskCalculations';
 import { usePermissions } from './hooks/usePermissions';
 import { useFinanceDerived } from './hooks/useFinanceDerived';
@@ -171,7 +172,6 @@ function App() {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [projectToDelete, setProjectToDelete] = useState(null); // { id, name } or null
-  const [projectToRename, setProjectToRename] = useState(null); // { id, name } or null
   const [renameProjectValue, setRenameProjectValue] = useState('');
   const [projectSettingsId, setProjectSettingsId] = useState(null);
 
@@ -183,15 +183,15 @@ function App() {
   const [taskTitleInput, setTaskTitleInput] = useState('');
   const [taskTypeInput, setTaskTypeInput] = useState('tarefa'); // 'tarefa' | 'despesa'
   const [taskMetaValueInput, setTaskMetaValueInput] = useState(''); // valor meta (string para input)
-  const [taskParcelasInput, setTaskParcelasInput] = useState(''); // n?mero de parcelas
+  const [taskParcelasInput, setTaskParcelasInput] = useState(''); // número de parcelas
   const [taskParcelaValueInput, setTaskParcelaValueInput] = useState(''); // valor da parcela (string)
-  const [taskParcelasPaidInput, setTaskParcelasPaidInput] = useState(''); // parcelas j? pagas (string num?rica)
+  const [taskParcelasPaidInput, setTaskParcelasPaidInput] = useState(''); // parcelas já pagas (string numérica)
   const [taskSaving, setTaskSaving] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [taskToPay, setTaskToPay] = useState(null);
   const [paymentAmountInput, setPaymentAmountInput] = useState('');
   const [paymentMode, setPaymentMode] = useState('valor'); // 'valor' | 'parcelas'
-  const [paymentParcelasInput, setPaymentParcelasInput] = useState(''); // n?mero de parcelas a abater
+  const [paymentParcelasInput, setPaymentParcelasInput] = useState(''); // número de parcelas a abater
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [tasksTab, setTasksTab] = useState('pendentes'); // 'pendentes' | 'concluidas'
   const [tasksSort, setTasksSort] = useState('updatedAt'); // 'updatedAt' | 'createdAt' | 'title' | 'metaValue'
@@ -200,7 +200,6 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [invites, setInvites] = useState([]);
   const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
-  const [inviteModalProject, setInviteModalProject] = useState(null); // { id, name }
   const [inviteEmailInput, setInviteEmailInput] = useState('');
   const [inviteRoleInput, setInviteRoleInput] = useState('view');
   const [inviteSending, setInviteSending] = useState(false);
@@ -287,7 +286,7 @@ function App() {
       const forecast = calculateForecast();
       if (forecast.isHigh) {
         setTimeout(() => {
-          const alertMsg = `Ol?! Notei que seu ritmo de gastos este m?s est? **${forecast.variationPct.toFixed(0)}% acima** da sua m?dia. Sua previs?o de fechamento ? de **R$ ${formatMoney(forecast.forecastAmount)}**. Quer ver onde pode economizar?`;
+          const alertMsg = `Olá! Notei que seu ritmo de gastos este mês está **${forecast.variationPct.toFixed(0)}% acima** da sua média. Sua previsão de fechamento é de **R$ ${formatMoney(forecast.forecastAmount)}**. Quer ver onde pode economizar?`;
           setChatMessages(prev => {
              const last = prev[prev.length - 1];
              if (last && last.text.includes('ritmo de gastos')) return prev;
@@ -307,9 +306,9 @@ function App() {
         const currentY = today.getFullYear();
         const lastCheck = localStorage.getItem(`karonte_last_insight_${currentUser.uid}`);
         
-        // Se n?o houver registro ou se o m?s/ano mudou
+        // Se não houver registro ou se o mês/ano mudou
         if (!lastCheck || lastCheck !== `${currentM}_${currentY}`) {
-          // Precisamos do insight do m?s ANTERIOR
+          // Precisamos do insight do mês ANTERIOR
           const prevDate = new Date();
           prevDate.setMonth(today.getMonth() - 1);
           const pM = prevDate.getMonth() + 1;
@@ -463,7 +462,7 @@ function App() {
           setTransactions((prev) => [...prev, ...created]);
         }
       } catch (error) {
-        console.error('Erro ao gerar recorr?ncias:', error);
+        console.error('Erro ao gerar recorrências:', error);
       }
     };
 
@@ -477,7 +476,7 @@ function App() {
     setAuthError('');
 
     if (authMode === 'register' && authPassword !== authConfirmPassword) {
-      setAuthError('As senhas n?o coincidem. Verifique e tente novamente.');
+      setAuthError('As senhas não coincidem. Verifique e tente novamente.');
       return;
     }
 
@@ -490,9 +489,9 @@ function App() {
       setAuthUsername(''); setAuthEmail(''); setAuthPassword(''); setAuthFullName(''); setAuthConfirmPassword('');
     } catch (error) {
        console.error(error.message);
-       if (error.code === 'auth/invalid-credential') setAuthError('Credenciais inv?lidas.');
-       else if (error.code === 'auth/email-already-in-use') setAuthError('Usu?rio j? existe.');
-       else if (error.message === 'access-denied') setAuthError('Usu?rio bloqueado pelo administrador.');
+       if (error.code === 'auth/invalid-credential') setAuthError('Credenciais inválidas.');
+       else if (error.code === 'auth/email-already-in-use') setAuthError('Usuário já existe.');
+       else if (error.message === 'access-denied') setAuthError('Usuário bloqueado pelo administrador.');
        else setAuthError('Ocorreu um erro. Tente novamente.');
     }
   };
@@ -566,7 +565,7 @@ function App() {
 
     if (type === 'expense' && paymentMethod === 'card') {
       if (!selectedCardId) {
-        alert('Por favor, selecione um cart?o de cr?dito.');
+        alert('Por favor, selecione um cartão de crédito.');
         return;
       }
     }
@@ -626,8 +625,8 @@ function App() {
       setSelectedCardId('');
       setShowTransactionDrawer(false);
     } catch(err) { 
-      console.error('Erro ao salvar transa??o:', err);
-      alert('Erro ao salvar transa??o.'); 
+      console.error('Erro ao salvar transação:', err);
+      alert('Erro ao salvar transação.'); 
     }
   };
 
@@ -666,16 +665,6 @@ function App() {
       if (activeProjectId === projectToDelete.id) setActiveProjectId(null);
       setProjectToDelete(null);
     } catch (err) { alert('Erro ao excluir projeto.'); }
-  };
-
-  const handleRenameProject = async () => {
-    if (!projectToRename || !renameProjectValue.trim()) return;
-    try {
-      await updateProject(projectToRename.id, { name: renameProjectValue.trim() });
-      setProjects(prev => prev.map(p => p.id === projectToRename.id ? { ...p, name: renameProjectValue.trim() } : p));
-      setProjectToRename(null);
-      setRenameProjectValue('');
-    } catch (err) { alert('Erro ao renomear projeto.'); }
   };
 
   const openTaskModal = (task = null) => {
@@ -793,7 +782,7 @@ function App() {
       closeTaskModal();
     } catch (err) {
       console.error('Erro ao salvar tarefa:', err);
-      alert('Erro ao salvar tarefa. Verifique as permiss?es do Firestore (cole??o "tasks").');
+      alert('Erro ao salvar tarefa. Verifique as permissões do Firestore (coleção "tasks").');
     } finally {
       setTaskSaving(false);
     }
@@ -811,23 +800,6 @@ function App() {
       await deleteTask(taskId);
       setTasks(prev => prev.filter(t => t.id !== taskId));
     } catch (err) { alert('Erro ao excluir tarefa.'); }
-  };
-
-  const handleSendInvite = async () => {
-    if (!inviteModalProject || !inviteEmailInput.trim()) return;
-    setInviteSending(true);
-    try {
-      await createInvite(inviteModalProject.id, inviteModalProject.name, inviteEmailInput.trim(), inviteRoleInput);
-      setInviteModalProject(null);
-      setInviteEmailInput('');
-      setInviteRoleInput('view');
-      alert('Convite enviado. O usu?rio ver? na aba de notifica??es quando fizer login.');
-    } catch (err) {
-      console.error(err);
-      alert(err.message || 'Erro ao enviar convite.');
-    } finally {
-      setInviteSending(false);
-    }
   };
 
   const handleAcceptInvite = async (invite) => {
@@ -910,11 +882,11 @@ function App() {
 
   const exportToCSV = () => {
     if (filteredTransactions.length === 0) return;
-    const headers = ['Data', 'Descri??o', 'Categoria', 'Tipo', 'Valor'];
+    const headers = ['Data', 'Descrição', 'Categoria', 'Tipo', 'Valor'];
     const rows = filteredTransactions.map(t => [
       t.displayDate,
       t.description,
-      t.category,
+      getTransactionCategoryLabel(t),
       t.type === 'income' ? 'Receita' : 'Despesa',
       t.amount.toString().replace('.', ',')
     ]);
@@ -928,14 +900,14 @@ function App() {
 
   const getCatFill = (index, catName) => {
     if (catName === 'Moradia') return 'var(--cat-moradia-fill)';
-    if (catName === 'Alimenta??o') return 'var(--cat-alimentacao-fill)';
+    if (catName === 'Alimentação') return 'var(--cat-alimentacao-fill)';
     if (catName === 'Lazer') return 'var(--cat-lazer-fill)';
     return chartTheme.palette[index % chartTheme.palette.length];
   };
 
   const getCatTrack = (catName) => {
     if (catName === 'Moradia') return 'var(--cat-moradia-track)';
-    if (catName === 'Alimenta??o') return 'var(--cat-alimentacao-track)';
+    if (catName === 'Alimentação') return 'var(--cat-alimentacao-track)';
     if (catName === 'Lazer') return 'var(--cat-lazer-track)';
     return 'var(--border-medium)';
   };
@@ -950,7 +922,7 @@ function App() {
   const handleConfirmBudget = async () => {
     const num = parseFloat(budgetInputValue.replace(',', '.'));
     if (isNaN(num) && budgetInputValue !== '') {
-       alert('Por favor, insira um n?mero v?lido.');
+       alert('Por favor, insira um número válido.');
        return;
     }
     
@@ -966,7 +938,7 @@ function App() {
        await saveUserBudgets(newBudgets, activeProjectId, budgetOwnerId);
        setBudgets(newBudgets);
        setBudgetModalOpen(false);
-    } catch(err) { alert('Erro ao salvar or?amento.')}
+    } catch(err) { alert('Erro ao salvar orçamento.')}
   };
 
   // --------- AI MONTHLY INSIGHTS LOGIC ---------
@@ -983,7 +955,8 @@ function App() {
     // Group by category to find top expense
     const catAnalysis = {};
     monthTransactions.filter(t => t.type === 'expense').forEach(t => {
-       catAnalysis[t.category] = (catAnalysis[t.category] || 0) + t.amount;
+       const label = getTransactionCategoryLabel(t);
+       catAnalysis[label] = (catAnalysis[label] || 0) + t.amount;
     });
     
     const sortedCats = Object.entries(catAnalysis).sort((a, b) => b[1] - a[1]);
@@ -996,7 +969,7 @@ function App() {
     if (!currentUser) return null;
     
     // 1. Check Cache
-    const cached = await getCachedInsight(currentUser.uid, month, year);
+    const cached = await getCachedInsight(currentUser.uid, month, year, activeProjectId);
     if (cached) return cached;
 
     // 2. Build Context
@@ -1004,21 +977,21 @@ function App() {
     
     // Fallback if no data
     if (ctx.income === 0 && ctx.expense === 0) {
-      return `Ainda n?o tenho dados suficientes para o m?s de ${month}/${year}. Assim que voc? registrar suas primeiras movimenta??es, poderei gerar um resumo inteligente para voc?! ??`;
+      return `Ainda não tenho dados suficientes para o mês de ${month}/${year}. Assim que você registrar suas primeiras movimentações, poderei gerar um resumo inteligente para você! 📊`;
     }
 
     // 3. Simulate IA response (Karonte Voice)
     // Here we could call a real LLM API, but we'll use a template that mimics the requested tone
-    const insight = `Seu resumo de ${month}/${year} chegou! ?
+    const insight = `Seu resumo de ${month}/${year} chegou! ✨
 
-?? Voc? teve R$ ${formatMoney(ctx.income)} em entradas e R$ ${formatMoney(ctx.expense)} em sa?das, fechando o m?s com um saldo de R$ ${formatMoney(ctx.balance)}. 
+💰 Você teve R$ ${formatMoney(ctx.income)} em entradas e R$ ${formatMoney(ctx.expense)} em saídas, fechando o mês com um saldo de R$ ${formatMoney(ctx.balance)}. 
 
-?? Notei que seu maior foco de gastos foi em **${ctx.topCategory}**. Se esse valor estiver dentro do planejado, ?timo! Caso contr?rio, que tal colocar um limite nessa categoria para o pr?ximo m?s?
+🔍 Notei que seu maior foco de gastos foi em **${ctx.topCategory}**. Se esse valor estiver dentro do planejado, ótimo! Caso contrário, que tal colocar um limite nessa categoria para o próximo mês?
 
-?? Continue assim! Manter a const?ncia ? o segredo para sua liberdade financeira. No que mais posso te ajudar hoje?`;
+🚀 Continue assim! Manter a constância é o segredo para sua liberdade financeira. No que mais posso te ajudar hoje?`;
 
     // 4. Save to Cache
-    await saveInsightToCache(currentUser.uid, month, year, insight);
+    await saveInsightToCache(currentUser.uid, month, year, insight, activeProjectId);
     
     return insight;
   };
@@ -1029,7 +1002,7 @@ function App() {
     if (!name || !currentUser) return;
     const allForType = newCatType === 'expense' ? expenseCategories : incomeCategories;
     if (allForType.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
-      alert('Esta categoria j? existe.');
+      alert('Esta categoria já existe.');
       return;
     }
     const updated = {
@@ -1090,7 +1063,7 @@ function App() {
     
     const limitNum = parseFloat(newCardLimit.replace(/\./g, '').replace(',', '.'));
     if (isNaN(limitNum) || limitNum <= 0) {
-      alert('Por favor, insira um limite v?lido maior que zero.');
+      alert('Por favor, insira um limite válido maior que zero.');
       return;
     }
 
@@ -1115,8 +1088,8 @@ function App() {
       setNewCardClosingDay(5);
       setNewCardDueDay(10);
     } catch (err) {
-      console.error('Erro ao salvar cart?o:', err);
-      alert('Erro ao cadastrar cart?o de cr?dito.');
+      console.error('Erro ao salvar cartão:', err);
+      alert('Erro ao cadastrar cartão de crédito.');
     } finally {
       setCardSavingActive(false);
     }
@@ -1124,7 +1097,7 @@ function App() {
 
   const handleDeleteCreditCard = async (cardId) => {
     if (!currentUser) return;
-    if (!window.confirm('Tem certeza de que deseja remover este cart?o? As despesas associadas a ele continuar?o existindo, mas perder?o a associa??o com o cart?o.')) {
+    if (!window.confirm('Tem certeza de que deseja remover este cartão? As despesas associadas a ele continuarão existindo, mas perderão a associação com o cartão.')) {
       return;
     }
     try {
@@ -1132,17 +1105,17 @@ function App() {
       setCreditCards(creditCards.filter(c => c.id !== cardId));
       if (selectedCardId === cardId) setSelectedCardId('');
     } catch (err) {
-      console.error('Erro ao deletar cart?o:', err);
-      alert('Erro ao excluir cart?o de cr?dito.');
+      console.error('Erro ao deletar cartão:', err);
+      alert('Erro ao excluir cartão de crédito.');
     }
   };
 
   // --------- CHATBOT ---------
   const [chatMessages, setChatMessages] = useState([
-    { id: 'welcome', sender: 'bot', text: 'Ol?! Sou seu assistente. Me mande algo como "cinema 50" ou me pergunte "qual meu saldo?".' }
+    { id: 'welcome', sender: 'bot', text: 'Olá! Sou seu assistente. Me mande algo como "cinema 50" ou me pergunte "qual meu saldo?".' }
   ]);
   const [chatInput, setChatInput] = useState('');
-  const [pendingActions, setPendingActions] = useState([]); // Array para suportar m?ltiplos lan?amentos
+  const [pendingActions, setPendingActions] = useState([]); // Array para suportar múltiplos lançamentos
 
   // --------- EFFECTS: DRAGGABLE CHAT FAB ---------
   useEffect(() => {
@@ -1157,7 +1130,7 @@ function App() {
       const rawX = clientX - fabOffsetRef.current.x;
       const rawY = clientY - fabOffsetRef.current.y;
 
-      const maxX = window.innerWidth - 56; // 56 = bot?o
+      const maxX = window.innerWidth - 56; // 56 = botão
       const maxY = window.innerHeight - 56;
 
       const clamped = {
@@ -1205,51 +1178,51 @@ function App() {
   }, [chatOpen, isDraggingFab]);
 
   const processChatMessage = (text) => {
-    // 1. Normaliza??o profunda
+    // 1. Normalização profunda
     const normalized = text.toLowerCase().trim()
       .normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Remove acentos
     
     // 2. Intents de Consulta (Respostas diretas)
     if (/(saldo|dinheiro|quanto tenho)/.test(normalized)) {
-       return { type: 'answer', text: `Seu saldo atual neste per?odo ? de R$ ${formatMoney(balance)}.` };
+       return { type: 'answer', text: `Seu saldo atual neste período é de R$ ${formatMoney(balance)}.` };
     }
     if (/(gasto|despesa|saida|quanto gastei)/.test(normalized)) {
-       return { type: 'answer', text: `Voc? gastou R$ ${formatMoney(totalExpense)} em despesas este m?s.` };
+       return { type: 'answer', text: `Você gastou R$ ${formatMoney(totalExpense)} em despesas este mês.` };
     }
     if (/(receita|entrada|ganhei|recebi)/.test(normalized) && !/\d/.test(normalized)) {
-       return { type: 'answer', text: `Voc? recebeu R$ ${formatMoney(totalIncome)} em receitas este m?s.` };
+       return { type: 'answer', text: `Você recebeu R$ ${formatMoney(totalIncome)} em receitas este mês.` };
     }
     if (/(maior gasto|mais caro|gastei mais)/.test(normalized)) {
-       if(categoryStats.length === 0) return { type: 'answer', text: 'Voc? ainda n?o tem despesas registradas este m?s.' };
+       if(categoryStats.length === 0) return { type: 'answer', text: 'Você ainda não tem despesas registradas este mês.' };
        const top = categoryStats[0];
-       return { type: 'answer', text: `Seu maior gasto este m?s ? com ${top.name}, totalizando R$ ${formatMoney(top.total)}.` };
+       return { type: 'answer', text: `Seu maior gasto este mês é com ${top.name}, totalizando R$ ${formatMoney(top.total)}.` };
     }
     // Intent: ASK_FORECAST
-    if (/(quanto vou gastar|previsao|proje??o|predi??o)/.test(normalized)) {
+    if (/(quanto vou gastar|previsao|projeção|predição)/.test(normalized)) {
       const forecast = calculateForecast();
-      let response = `Analisei seu hist?rico e aqui est? a proje??o para este m?s: \n\n`;
-      response += `?? Gasto at? agora: R$ ${formatMoney(forecast.currentMonthSpent)}\n`;
-      response += `?? Previs?o final: R$ ${formatMoney(forecast.forecastAmount)}\n`;
+      let response = `Analisei seu histórico e aqui está a projeção para este mês: \n\n`;
+      response += `📌 Gasto até agora: R$ ${formatMoney(forecast.currentMonthSpent)}\n`;
+      response += `🔮 Previsão final: R$ ${formatMoney(forecast.forecastAmount)}\n`;
       
       if (forecast.isHigh) {
-        response += `?? Aten??o: Sua proje??o est? **${forecast.variationPct.toFixed(0)}% acima** da sua m?dia hist?rica (R$ ${formatMoney(forecast.monthlyAverage)}). Sugiro revisar seus gastos vari?veis.`;
+        response += `⚠️ Atenção: Sua projeção está **${forecast.variationPct.toFixed(0)}% acima** da sua média histórica (R$ ${formatMoney(forecast.monthlyAverage)}). Sugiro revisar seus gastos variáveis.`;
       } else {
-        response += `? Tudo sob controle! Sua proje??o est? dentro da sua m?dia hist?rica.`;
+        response += `✅ Tudo sob controle! Sua projeção está dentro da sua média histórica.`;
       }
       return { type: 'answer', text: response };
     }
     if (/(resumo|balanco|geral|estatistica|como estou)/.test(normalized)) {
        const percent = totalIncome > 0 ? ((balance / totalIncome) * 100).toFixed(0) : '0';
-       return { type: 'answer', text: `Resumo do m?s: Receitas R$ ${formatMoney(totalIncome)}, Despesas R$ ${formatMoney(totalExpense)}. Seu saldo est? em R$ ${formatMoney(balance)} (${percent}% do total).` };
+       return { type: 'answer', text: `Resumo do mês: Receitas R$ ${formatMoney(totalIncome)}, Despesas R$ ${formatMoney(totalExpense)}. Seu saldo está em R$ ${formatMoney(balance)} (${percent}% do total).` };
     }
     if (/(ajuda|socorro|que voce faz|comandos)/.test(normalized)) {
-       return { type: 'answer', text: 'Eu sou o Karonte! Posso registrar seus gastos (ex: "50 pizza e 20 uber", "ontem gastei 30 com caf?") ou responder sobre suas finan?as (ex: "qual meu saldo?", "maior gasto do m?s?").' };
+       return { type: 'answer', text: 'Eu sou o Karonte! Posso registrar seus gastos (ex: "50 pizza e 20 uber", "ontem gastei 30 com café") ou responder sobre suas finanças (ex: "qual meu saldo?", "maior gasto do mês?").' };
     }
     if (/(categoria|quais categorias)/.test(normalized)) {
-       return { type: 'answer', text: `Suas categorias de despesa s?o: ${expenseCategories.join(', ')}.` };
+       return { type: 'answer', text: `Suas categorias de despesa são: ${expenseCategories.join(', ')}.` };
     }
 
-    // 3. Extra??o de Valor Robustecida
+    // 3. Extração de Valor Robustecida
     let numericValue = null;
     let moneyMatch = normalized.match(/(?:r\$)?\s?(\d+(?:[.,]\d{1,3})?)\s?(k|mil)?/);
     
@@ -1260,10 +1233,10 @@ function App() {
     }
 
     if (!numericValue || isNaN(numericValue)) {
-       return { type: 'answer', text: 'N?o consegui identificar o valor. Tente algo como "50 lanche" ou "1.5k salario".' };
+       return { type: 'answer', text: 'Não consegui identificar o valor. Tente algo como "50 lanche" ou "1.5k salario".' };
     }
 
-    // 4. Intelig?ncia Temporal (Datas Naturais)
+    // 4. Inteligência Temporal (Datas Naturais)
     let finalDate = new Date();
     if (normalized.includes('ontem')) {
       finalDate.setDate(finalDate.getDate() - 1);
@@ -1283,7 +1256,7 @@ function App() {
       }
     }
 
-    // 5. Extra??o de Descri??o e Limpeza
+    // 5. Extração de Descrição e Limpeza
     let rawDesc = normalized.replace(moneyMatch[0], '')
       .replace(/(ontem|anteontem|segunda|terca|quarta|quinta|sexta|sabado|domingo)/, '')
       .trim();
@@ -1292,49 +1265,25 @@ function App() {
     
     if (!cleanedDesc || cleanedDesc.length < 2) cleanedDesc = 'Registro via Assistente';
 
-    // 6. Infer?ncia de Tipo e Categoria
+    // 6. Inferência de Tipo e Categoria
     const incomeKeywords = ['salario', 'freelance', 'receita', 'renda', 'bonus', 'pagamento', 'ganhei', 'venda', 'pix recebido', 'reembolso'];
     let inferType = incomeKeywords.some(kw => normalized.includes(kw)) ? 'income' : 'expense';
 
-    if (inferType === 'expense') {
-      const matchCustomIncome = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
-      if (matchCustomIncome) inferType = 'income';
+    if (inferType === 'expense' && findCustomCategoryInText(normalized, customCategories.income)) {
+      inferType = 'income';
     }
 
-    let inferCategory = 'Outros';
-    const categoryMaps = {
-      'Lazer': /(academia|cinema|bar|lazer|balada|jogo|game|festa|viagem|netflix|streaming|spotify|show|teatro|shopping|passeio)/,
-      'Alimenta??o': /(mercado|supermercado|restaurante|pizza|ifood|lanche|comida|padaria|acougue|feira|cafe|almo?o|jantar|doce)/,
-      'Moradia': /(aluguel|reforma|condominio|luz|agua|conta|energia|internet|gas|iptu|moveis|casa|apartamento)/,
-      'Sa?de': /(farmacia|medico|consulta|remedio|hospital|dentista|exame|saude|psicologo|terapia|plano)/,
-      'Transporte': /(transporte|uber|99|gasolina|combustivel|onibus|metro|trem|oficina|pedagio|estacionamento|carro|moto)/,
-    };
+    const inferredCategory = inferCategoryFromText(normalized, inferType, customCategories);
 
-    if (inferType === 'expense') {
-       const matchCustom = customCategories.expense.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
-       if (matchCustom) inferCategory = matchCustom;
-       else {
-         for (const [catName, regex] of Object.entries(categoryMaps)) {
-           if (regex.test(normalized)) { inferCategory = catName; break; }
-         }
-       }
-    } else {
-       const matchCustom = customCategories.income.find(c => normalized.includes(c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")));
-       if (matchCustom) inferCategory = matchCustom;
-       else if (/(salario|pagamento|pro-labore)/.test(normalized)) inferCategory = 'Sal?rio';
-       else if (/(freelance|projeto|job|freela)/.test(normalized)) inferCategory = 'Freelance';
-       else if (/(investimento|dividendos|juros|rendimento)/.test(normalized)) inferCategory = 'Investimentos';
-    }
-
-    // 7. Alertas de Or?amento Proativos
+    // 7. Alertas de Orçamento Proativos
     let budgetWarning = '';
     if (inferType === 'expense') {
-       const currentSpent = categoryStats.find(s => s.name === inferCategory)?.total || 0;
-       const info = getCategoryBudgetInfoForCat(inferCategory, currentSpent + numericValue);
+       const currentSpent = categoryStats.find(s => s.name === inferredCategory)?.total || 0;
+       const info = getCategoryBudgetInfoForCat(inferredCategory, currentSpent + numericValue);
        if (info.isOver100) {
-          budgetWarning = `\n\n?? Aten??o: este gasto far? voc? ultrapassar o limite de R$ ${formatMoney(info.limit)} para ${inferCategory}.`;
+          budgetWarning = `\n\n⚠️ Atenção: este gasto fará você ultrapassar o limite de R$ ${formatMoney(info.limit)} para ${inferredCategory}.`;
        } else if (info.isOver80) {
-          budgetWarning = `\n\n?? Nota: voc? est? chegando perto do limite de ${inferCategory} (${info.pct.toFixed(0)}%).`;
+          budgetWarning = `\n\n💡 Nota: você está chegando perto do limite de ${inferredCategory} (${info.pct.toFixed(0)}%).`;
        }
     }
 
@@ -1342,12 +1291,12 @@ function App() {
 
     return {
        type: 'action',
-       text: `Entendi! Deseja registrar a seguinte movimenta??o?${budgetWarning}`,
+       text: `Entendi! Deseja registrar a seguinte movimentação?${budgetWarning}`,
        payload: {
           description: cleanedDesc,
           amount: numericValue,
           type: inferType,
-          category: inferCategory,
+          category: inferredCategory,
           date: finalDate.toISOString()
        }
     };
@@ -1396,7 +1345,7 @@ function App() {
           setChatMessages(prev => [
             ...prev, 
             { id: crypto.randomUUID(), sender: 'user', text: input },
-            { id: crypto.randomUUID(), sender: 'bot', text: 'Entendi a corre??o! Atualizei o resumo abaixo. Deseja confirmar agora?' }
+            { id: crypto.randomUUID(), sender: 'bot', text: 'Entendi a correção! Atualizei o resumo abaixo. Deseja confirmar agora?' }
           ]);
           setChatInput('');
           return;
@@ -1461,7 +1410,7 @@ function App() {
           }
        } else if (answers.length === 0) {
           // Fallback if nothing was identified
-          setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: 'N?o entendi seu pedido. Tente "50 pizza" ou "qual meu saldo?".' }]);
+          setChatMessages(prev => [...prev, { id: crypto.randomUUID(), sender: 'bot', text: 'Não entendi seu pedido. Tente "50 pizza" ou "qual meu saldo?".' }]);
        }
 
        if (!chatOpen) setUnreadCount(prev => prev + 1);
@@ -1508,7 +1457,7 @@ function App() {
     recognition.onerror = (event) => {
       console.error("Speech Recognition Error", event.error);
       setIsRecording(false);
-      if (event.error === 'not-allowed') alert("Permiss?o de microfone negada.");
+      if (event.error === 'not-allowed') alert("Permissão de microfone negada.");
     };
 
     recognitionRef.current = recognition;
@@ -1555,7 +1504,7 @@ function App() {
          ...prev, 
          { id: crypto.randomUUID(), sender: 'user', text: 'Sim' }, // Visual feedback
          { id: crypto.randomUUID(), sender: 'bot', text: updatedActions.length > 0 
-           ? `Registrado! Vamos para o pr?ximo: ${updatedActions[0].description}?` 
+           ? `Registrado! Vamos para o próximo: ${updatedActions[0].description}?` 
            : `Feito! Registrei ${action.type === 'income' ? 'a receita' : 'a despesa'} com sucesso.` }
       ]);
     } catch(err) {
@@ -1571,7 +1520,7 @@ function App() {
     setChatInput('');
     setChatMessages(prev => [
        ...prev, 
-       { id: crypto.randomUUID(), sender: 'user', text: 'N?o' }, 
+       { id: crypto.randomUUID(), sender: 'user', text: 'Não' }, 
        { id: crypto.randomUUID(), sender: 'bot', text: updatedActions.length > 0 
          ? `Beleza, pulei esse. E quanto a: ${updatedActions[0].description}?` 
          : 'Tudo bem, registro cancelado.' }
@@ -1695,7 +1644,7 @@ function App() {
           <span className="mobile-project-name">
             {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
           </span>
-          <span className="mobile-project-arrow">?</span>
+          <span className="mobile-project-arrow">▾</span>
         </button>
 
         <div className="mobile-header-actions">
@@ -1705,16 +1654,16 @@ function App() {
               type="button"
               className="notifications-btn"
               onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
-              title="Notifica??es"
+              title="Notificações"
             >
-              ??
+              🔔
               {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
             </button>
             {showNotificationsPanel && (
               <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
-                <div className="notifications-dropdown-header">Notifica??es</div>
+                <div className="notifications-dropdown-header">Notificações</div>
                 {invites.length === 0 && notifications.length === 0 && (
-                  <div className="notifications-empty">Nenhuma notifica??o.</div>
+                  <div className="notifications-empty">Nenhuma notificação.</div>
                 )}
                 {invites.map(inv => (
                   <div key={inv.id} className="notification-item notification-invite">
@@ -1778,7 +1727,7 @@ function App() {
                     >
                       <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
                       <span className="project-item-name">{p.name}</span>
-                      {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">??</span>}
+                      {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
                     </button>
                     {isOwner && (
                       <button
@@ -1790,9 +1739,9 @@ function App() {
                           setCurrentView('projectSettings');
                           setShowProjectDropdown(false);
                         }}
-                        title="Configura??es do projeto"
+                        title="Configurações do projeto"
                       >
-                        ?
+                        ⚙
                       </button>
                     )}
                   </div>
@@ -1821,14 +1770,14 @@ function App() {
             </div>
             <div className="profile-popover-divider"></div>
             <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
-              ? Configura??es
+              ⚙ Configurações
             </div>
             <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
-              {theme === 'dark' ? '?? Modo Claro' : '?? Modo Escuro'}
+              {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
             </div>
             <div className="profile-popover-divider"></div>
             <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
-              ?? Sair do App
+              🚪 Sair do App
             </button>
           </div>
         )}
@@ -1861,7 +1810,7 @@ function App() {
                 {activeProjectId === null ? 'Geral' : (projects.find(p => p.id === activeProjectId)?.name || '...')}
               </span>
             </div>
-            <span className="project-selector-arrow">?</span>
+            <span className="project-selector-arrow">▾</span>
           </button>
           
           {showProjectDropdown && (
@@ -1894,7 +1843,7 @@ function App() {
                       >
                         <span className="project-item-avatar">{p.name.charAt(0).toUpperCase()}</span>
                         <span className="project-item-name">{p.name}</span>
-                        {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">??</span>}
+                        {p.isShared && <span className="project-item-shared" title="Projeto compartilhado">👤</span>}
                       </button>
                       {isOwner && (
                         <button
@@ -1906,9 +1855,9 @@ function App() {
                             setCurrentView('projectSettings');
                             setShowProjectDropdown(false);
                           }}
-                          title="Configura??es do projeto"
+                          title="Configurações do projeto"
                         >
-                          ?
+                          ⚙
                         </button>
                       )}
                     </div>
@@ -1931,17 +1880,17 @@ function App() {
         
         <nav className="sidebar-nav">
           <a href="#" className={`nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
-            <span className="icon">?</span> Vis?o geral
+            <span className="icon">◈</span> Visão geral
           </a>
           <a href="#" className={`nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
-            <span className="icon">?</span> Or?amentos
+            <span className="icon">○</span> Orçamentos
           </a>
           <a href="#" className={`nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
-            <span className="icon">?</span> Tarefas
+            <span className="icon">☑</span> Tarefas
           </a>
           {canAddToProject && (
             <a href="#" className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
-              <span className="icon">?</span> Importar
+              <span className="icon">↓</span> Importar
             </a>
           )}
         </nav>
@@ -1956,21 +1905,21 @@ function App() {
               <span className="user-profile-name">{currentUser.username || currentUser.displayName || currentUser.email}</span>
               <span className="user-profile-email">{currentUser.email}</span>
             </div>
-            <span className="profile-options-trigger">?</span>
+            <span className="profile-options-trigger">⚙</span>
           </div>
 
           {showProfilePopover && (
             <div className="profile-popover">
               <div className="profile-popover-header">Sua Conta</div>
               <div className="profile-popover-item" onClick={() => { setCurrentView('userSettings'); setShowProfilePopover(false); }}>
-                ? Configura??es
+                ⚙ Configurações
               </div>
               <div className="profile-popover-item" onClick={() => { toggleTheme(); setShowProfilePopover(false); }}>
-                {theme === 'dark' ? '?? Modo Claro' : '?? Modo Escuro'}
+                {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
               </div>
               <div className="profile-popover-divider"></div>
               <button type="button" className="profile-popover-logout" onClick={() => { handleLogout(); setShowProfilePopover(false); }}>
-                ?? Sair do App
+                🚪 Sair do App
               </button>
             </div>
           )}
@@ -1980,30 +1929,30 @@ function App() {
       {/* MOBILE BOTTOM NAVIGATION BAR */}
       <nav className="mobile-bottom-nav">
         <a href="#" className={`mobile-nav-item ${currentView === 'hub' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('hub'); }}>
-          <span className="icon">?</span>
-          <span className="label">In?cio</span>
+          <span className="icon">◈</span>
+          <span className="label">Início</span>
         </a>
         {canAddToProject && (
           <button
             type="button"
             className="mobile-nav-fab"
             onClick={() => setShowTransactionDrawer(true)}
-            aria-label="Novo lan?amento"
+            aria-label="Novo lançamento"
           >
             +
           </button>
         )}
         <a href="#" className={`mobile-nav-item ${currentView === 'budgets' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('budgets'); }}>
-          <span className="icon">?</span>
-          <span className="label">Or?amento</span>
+          <span className="icon">○</span>
+          <span className="label">Orçamento</span>
         </a>
         <a href="#" className={`mobile-nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('tarefas'); }}>
-          <span className="icon">?</span>
+          <span className="icon">☑</span>
           <span className="label">Tarefas</span>
         </a>
         {canAddToProject && (
           <a href="#" className={`mobile-nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); setCurrentView('import'); }}>
-            <span className="icon">?</span>
+            <span className="icon">↓</span>
             <span className="label">Importar</span>
           </a>
         )}
@@ -2014,12 +1963,12 @@ function App() {
         <header className="top-bar">
           <div className="page-context">
             <h2 className="page-title">
-              {currentView === 'hub' && 'Vis?o Geral'}
-              {currentView === 'budgets' && 'Or?amentos'}
+              {currentView === 'hub' && 'Visão Geral'}
+              {currentView === 'budgets' && 'Orçamentos'}
               {currentView === 'tarefas' && 'Tarefas'}
               {currentView === 'import' && 'Importar Extrato'}
-              {currentView === 'userSettings' && 'Configura??es de Conta'}
-              {currentView === 'projectSettings' && 'Configura??es do Projeto'}
+              {currentView === 'userSettings' && 'Configurações de Conta'}
+              {currentView === 'projectSettings' && 'Configurações do Projeto'}
             </h2>
             {activeProjectId !== null && (
               <span className="project-badge">
@@ -2041,7 +1990,7 @@ function App() {
                </select>
             </div>
             {filteredTransactions.length > 0 ? (
-               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relat?rio</button>
+               <button onClick={exportToCSV} className="export-btn" title="Exportar CSV">Download Relatório</button>
             ) : null}
             <div className="divider"></div>
             
@@ -2051,16 +2000,16 @@ function App() {
                 type="button"
                 className="notifications-btn"
                 onClick={(e) => { e.stopPropagation(); setShowNotificationsPanel(prev => !prev); }}
-                title="Notifica??es"
+                title="Notificações"
               >
-                ??
+                🔔
                 {(invites.length > 0) && <span className="notifications-badge">{invites.length}</span>}
               </button>
               {showNotificationsPanel && (
                 <div className="notifications-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <div className="notifications-dropdown-header">Notifica??es</div>
+                  <div className="notifications-dropdown-header">Notificações</div>
                   {invites.length === 0 && notifications.length === 0 && (
-                    <div className="notifications-empty">Nenhuma notifica??o.</div>
+                    <div className="notifications-empty">Nenhuma notificação.</div>
                   )}
                   {invites.map(inv => (
                     <div key={inv.id} className="notification-item notification-invite">
@@ -2125,7 +2074,7 @@ function App() {
                 .then(() => {
                   setProjects((prev) => prev.map((p) => (p.id === proj.id ? { ...p, collaboratorRoles: { ...(p.collaboratorRoles || {}), [uid]: newRole } } : p)));
                 })
-                .catch(() => alert('Erro ao atualizar permiss?o.'));
+                .catch(() => alert('Erro ao atualizar permissão.'));
             }}
             onRemoveCollaborator={(uid) => {
               const proj = projects.find((p) => p.id === projectSettingsId);
@@ -2222,7 +2171,7 @@ function App() {
         )}
 
         {currentView === 'import' && (
-          <Suspense fallback={<main className="main-content"><div className="card" style={{ padding: '2rem', textAlign: 'center' }}>Carregando importacao...</div></main>}>
+          <Suspense fallback={<main className="main-content"><div className="card" style={{ padding: '2rem', textAlign: 'center' }}>Carregando importação…</div></main>}>
             <StatementImportView
               currentUser={currentUser}
               activeProjectId={activeProjectId}
@@ -2288,7 +2237,7 @@ function App() {
                   <span className="bot-status">Online</span>
               </div>
             </div>
-            <button className="chat-close-btn" onClick={() => setChatOpen(false)}>?</button>
+            <button className="chat-close-btn" onClick={() => setChatOpen(false)}>×</button>
           </div>
           
           <div className="chat-messages">
@@ -2299,9 +2248,9 @@ function App() {
                   </div>
                   
                   {/* Render Confirmation Card if payload exists on this bot msg and it is the pending action match */}
-                    {(msg.sender === 'bot' && pendingActions.length > 0 && chatMessages[chatMessages.length - 1].id === msg.id && (msg.text.includes('Deseja registrar') || msg.text.includes('Vamos para o pr?ximo') || msg.text.includes('Entendi a corre??o'))) ? (
+                    {(msg.sender === 'bot' && pendingActions.length > 0 && chatMessages[chatMessages.length - 1].id === msg.id && (msg.text.includes('Deseja registrar') || msg.text.includes('Vamos para o próximo') || msg.text.includes('Entendi a correção'))) ? (
                       <div className="chat-action-card">
-                        <div className="action-title">Resumo Extra?do</div>
+                        <div className="action-title">Resumo Extraído</div>
                         <div className="action-detail">
                             <span>Tipo:</span> <span className="action-val" style={{color: pendingActions[0].type === 'expense' ? 'var(--danger-color)' : 'var(--success-color)'}}>{pendingActions[0].type === 'income' ? 'Receita' : 'Despesa'}</span>
                         </div>
@@ -2326,15 +2275,15 @@ function App() {
 
           <div className="chat-input-area">
             <div className="chat-suggestions">
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>?? 50 ifood</div>
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>?? 90 uber</div>
-                <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>?? Qual meu saldo?</div>
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('50 ifood')}>🍟 50 ifood</div>
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('90 uber')}>🚗 90 uber</div>
+                <div className="suggestion-chip" onClick={() => chatSuggestionClick('Qual meu saldo?')}>📊 Qual meu saldo?</div>
             </div>
             <form onSubmit={handleChatSubmit} className="chat-form">
                 <input 
                   type="text" 
                   className="chat-input" 
-                  placeholder={pendingActions.length > 0 ? "Sim ou N?o..." : "Ex: 120 da academia"}
+                  placeholder={pendingActions.length > 0 ? "Sim ou Não..." : "Ex: 120 da academia"}
                   value={chatInput}
                   onChange={e => setChatInput(e.target.value)}
                 />
@@ -2342,14 +2291,14 @@ function App() {
                    type="button" 
                    className={`chat-voice-btn ${isRecording ? 'recording' : ''}`}
                    onClick={handleVoiceToggle}
-                   title={hasSpeechSupport ? "Comando de Voz" : "Seu navegador n?o suporta reconhecimento de voz da Web API."}
+                   title={hasSpeechSupport ? "Comando de Voz" : "Seu navegador não suporta reconhecimento de voz da Web API."}
                    disabled={!hasSpeechSupport}
                    style={!hasSpeechSupport ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                 >
-                  ???
+                  🎙️
                 </button>
                 <button type="submit" className="chat-send-btn" disabled={!chatInput.trim()}>
-                  ?
+                  ↑
                 </button>
             </form>
           </div>
@@ -2361,7 +2310,7 @@ function App() {
            <div className="budget-modal-card" onClick={e => e.stopPropagation()}>
               <div className="modal-header">
                  <h3>Limite para {activeBudgetCat}</h3>
-                 <button className="chat-close-btn" onClick={() => setBudgetModalOpen(false)}>?</button>
+                 <button className="chat-close-btn" onClick={() => setBudgetModalOpen(false)}>×</button>
               </div>
               <div className="modal-body">
                  <p className="modal-subtitle">Defina o teto de gastos mensal para esta categoria.</p>
@@ -2432,11 +2381,11 @@ function App() {
         <div className="modal-overlay">
           <div className="modal-content">
             <div className="modal-header">
-              <h2>Novo Projeto Or?ament?rio</h2>
-              <button className="close-btn" onClick={() => setShowProjectModal(false)}>?</button>
+              <h2>Novo Projeto Orçamentário</h2>
+              <button className="close-btn" onClick={() => setShowProjectModal(false)}>✕</button>
             </div>
             <p className="modal-subtitle">
-              Crie projetos para gerenciar or?amentos separados (ex: "Constru??o da Casa", "Casamento 2025").
+              Crie projetos para gerenciar orçamentos separados (ex: "Construção da Casa", "Casamento 2025").
             </p>
             
             <div className="form-group">
@@ -2458,73 +2407,18 @@ function App() {
         </div>
       )}
 
-      {/* MODAL CONVIDAR PARA PROJETO */}
-      {inviteModalProject && (
-        <div className="modal-overlay" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Convidar para &quot;{inviteModalProject.name}&quot;</h2>
-              <button className="close-btn" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>?</button>
-            </div>
-            <p className="modal-subtitle">O convidado receber? o convite ao fazer login (e-mail usado no cadastro).</p>
-            <div className="form-group">
-              <label>E-mail do usu?rio</label>
-              <input type="email" value={inviteEmailInput} onChange={e => setInviteEmailInput(e.target.value)} placeholder="email@exemplo.com" autoFocus />
-            </div>
-            <div className="form-group">
-              <label>N?vel de acesso</label>
-              <select value={inviteRoleInput} onChange={e => setInviteRoleInput(e.target.value)}>
-                <option value="view">Apenas ver</option>
-                <option value="add">Ver e incluir registros</option>
-                <option value="manage">Ver, incluir e excluir registros</option>
-              </select>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="btn-secondary" onClick={() => { setInviteModalProject(null); setInviteEmailInput(''); }}>Cancelar</button>
-              <button type="button" className="submit-btn" onClick={handleSendInvite} disabled={inviteSending || !inviteEmailInput.trim()}>{inviteSending ? 'Enviando...' : 'Enviar convite'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CONFIRMA??O EXCLUS?O PROJETO */}
+      {/* CONFIRMAÇÃO EXCLUSÃO PROJETO */}
       {projectToDelete && (
         <div className="modal-overlay" onClick={() => setProjectToDelete(null)}>
           <div className="modal-content modal-confirm" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Excluir projeto</h2>
-              <button className="close-btn" onClick={() => setProjectToDelete(null)}>?</button>
+              <button className="close-btn" onClick={() => setProjectToDelete(null)}>✕</button>
             </div>
-            <p className="modal-subtitle">Tem certeza que deseja excluir o projeto &quot;{projectToDelete.name}&quot;? Esta a??o n?o pode ser desfeita.</p>
+            <p className="modal-subtitle">Tem certeza que deseja excluir o projeto &quot;{projectToDelete.name}&quot;? Esta ação não pode ser desfeita.</p>
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setProjectToDelete(null)}>Cancelar</button>
               <button className="submit-btn" style={{ background: 'var(--danger-color)' }} onClick={handleConfirmDeleteProject}>Excluir</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* RENOMEAR PROJETO */}
-      {projectToRename && (
-        <div className="modal-overlay" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Renomear projeto</h2>
-              <button className="close-btn" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>?</button>
-            </div>
-            <div className="form-group">
-              <label>Nome do projeto</label>
-              <input
-                type="text"
-                value={renameProjectValue}
-                onChange={e => setRenameProjectValue(e.target.value)}
-                placeholder="Novo nome..."
-                autoFocus
-              />
-            </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => { setProjectToRename(null); setRenameProjectValue(''); }}>Cancelar</button>
-              <button className="submit-btn" onClick={handleRenameProject} disabled={!renameProjectValue.trim()}>Salvar</button>
             </div>
           </div>
         </div>
@@ -2536,16 +2430,16 @@ function App() {
           <div className="modal-content modal-task" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>{taskEditId ? 'Editar tarefa' : 'Nova tarefa'}</h2>
-              <button className="close-btn" onClick={closeTaskModal}>?</button>
+              <button className="close-btn" onClick={closeTaskModal}>✕</button>
             </div>
             <div className="form-group">
-              <label>Descri??o da tarefa</label>
+              <label>Descrição da tarefa</label>
               <input
                 type="text"
                 value={taskTitleInput}
                 onChange={e => setTaskTitleInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSaveTask(); } }}
-                placeholder="Ex: Conta de luz, Empr?stimo"
+                placeholder="Ex: Conta de luz, Empréstimo"
                 autoFocus
               />
             </div>
@@ -2553,7 +2447,7 @@ function App() {
               <label>Tipo</label>
               <select value={taskTypeInput} onChange={e => setTaskTypeInput(e.target.value)}>
                 <option value="tarefa">Tarefa</option>
-                <option value="despesa">Despesa / D?vida</option>
+                <option value="despesa">Despesa / Dívida</option>
               </select>
             </div>
             {taskTypeInput === 'despesa' && (
@@ -2582,7 +2476,7 @@ function App() {
                   ) : null}
                 </div>
                 <div className="form-group">
-                  <label>N?mero de parcelas (opcional)</label>
+                  <label>Número de parcelas (opcional)</label>
                   <input
                     type="number"
                     min="1"
@@ -2592,7 +2486,7 @@ function App() {
                   />
                 </div>
                 <div className="form-group">
-                  <label>Parcelas j? pagas (opcional)</label>
+                  <label>Parcelas já pagas (opcional)</label>
                   <input
                     type="number"
                     min="0"
@@ -2627,15 +2521,15 @@ function App() {
         </div>
       )}
 
-      {/* MODAL REGISTRAR PAGAMENTO (abater d?vida) */}
+      {/* MODAL REGISTRAR PAGAMENTO (abater dívida) */}
       {showPaymentModal && taskToPay && (
         <div className="modal-overlay" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Registrar pagamento</h2>
-              <button className="close-btn" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>?</button>
+              <button className="close-btn" onClick={() => { setShowPaymentModal(false); setTaskToPay(null); setPaymentAmountInput(''); setPaymentParcelasInput(''); }}>✕</button>
             </div>
-            <p className="modal-subtitle">Abater valor em &quot;{taskToPay.title}&quot;. Valor pago at? agora: R$ {formatMoney(Number(taskToPay.paidAmount) || 0)} de R$ {formatMoney(Number(taskToPay.metaValue) || 0)}.</p>
+            <p className="modal-subtitle">Abater valor em &quot;{taskToPay.title}&quot;. Valor pago até agora: R$ {formatMoney(Number(taskToPay.paidAmount) || 0)} de R$ {formatMoney(Number(taskToPay.metaValue) || 0)}.</p>
             <div className="form-group">
               <label>Modo de abatimento</label>
               <select value={paymentMode} onChange={e => setPaymentMode(e.target.value)}>
@@ -2662,7 +2556,7 @@ function App() {
                     const n = parseInt(paymentParcelasInput, 10) || 0;
                     return (parcelaValue > 0 && n > 0)
                       ? <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>Valor abatido: R$ {formatMoney(n * parcelaValue)}</div>
-                      : (parcelas <= 0 ? <div style={{ fontSize: 11, color: 'var(--danger-color)', marginTop: 4 }}>Esta despesa n?o tem parcelas definidas.</div> : null);
+                      : (parcelas <= 0 ? <div style={{ fontSize: 11, color: 'var(--danger-color)', marginTop: 4 }}>Esta despesa não tem parcelas definidas.</div> : null);
                   })()}
                 </>
               ) : (
