@@ -5,7 +5,7 @@ import {
   getImportErrorMessage,
   MAX_PDF_SIZE_BYTES,
 } from '../services/statementImportService';
-import { markDuplicates, createTransactionHash } from '../utils/statementParser';
+import { markDuplicates, createTransactionHash, findDuplicateMatch } from '../utils/statementParser';
 
 const STATUS_LABELS = {
   waiting: 'Aguardando',
@@ -46,6 +46,8 @@ export default function StatementImportView({
   canAddToProject = true,
   onImportTransactions,
   formatMoney,
+  selectedMonth,
+  selectedYear,
 }) {
   const fileInputRef = useRef(null);
   const [fileEntries, setFileEntries] = useState([]);
@@ -122,8 +124,9 @@ export default function StatementImportView({
     const files = fileEntries.map((e) => e.file);
 
     try {
+      const referenceYear = selectedYear || new Date().getFullYear();
       const results = await extractTextFromMultiplePdfs(files, {
-        parseOptions: { customCategories, referenceYear: new Date().getFullYear() },
+        parseOptions: { customCategories, referenceYear },
         onFileProgress: (index, status, fileName, errorMsg) => {
           setFileEntries((prev) =>
             prev.map((entry, i) => {
@@ -189,10 +192,10 @@ export default function StatementImportView({
         if (row.id !== id) return row;
         const updated = { ...row, ...patch };
         if (patch.description !== undefined || patch.amount !== undefined || patch.date !== undefined) {
-          updated.duplicateHash = createTransactionHash(updated);
-          updated.isDuplicate = transactions.some((t) =>
-            createTransactionHash({ date: t.date, amount: t.amount, description: t.description }) === updated.duplicateHash
-          );
+          const match = findDuplicateMatch(updated, transactions);
+          updated.duplicateHash = match.duplicateHash;
+          updated.isDuplicate = match.isDuplicate;
+          updated.isPossibleDuplicate = match.isPossibleDuplicate;
         }
         return updated;
       })
@@ -206,7 +209,7 @@ export default function StatementImportView({
   const toggleAll = (selected) => {
     setParsedRows((prev) =>
       prev.map((r) => {
-        if (hideDuplicates && r.isDuplicate) return r;
+        if (hideDuplicates && (r.isDuplicate || r.isPossibleDuplicate)) return r;
         return { ...r, selected };
       })
     );
@@ -214,7 +217,7 @@ export default function StatementImportView({
 
   const visibleRows = useMemo(() => {
     if (!hideDuplicates) return parsedRows;
-    return parsedRows.filter((r) => !r.isDuplicate);
+    return parsedRows.filter((r) => !r.isDuplicate && !r.isPossibleDuplicate);
   }, [parsedRows, hideDuplicates]);
 
   const selectedRows = useMemo(
@@ -223,7 +226,7 @@ export default function StatementImportView({
   );
 
   const duplicateCount = useMemo(
-    () => parsedRows.filter((r) => r.isDuplicate).length,
+    () => parsedRows.filter((r) => r.isDuplicate || r.isPossibleDuplicate).length,
     [parsedRows]
   );
 
@@ -306,7 +309,7 @@ export default function StatementImportView({
       <main className="import-view main-content">
         <div className="import-permission-denied card">
           <h3>Importação indisponível</h3>
-          <p>Você não tem permissão para adicionar lançamentos neste projeto. Peça ao dono para alterar seu papel para &quot;ver e incluir&quot; ou &quot;gerenciar&quot;.</p>
+          <p>Você não tem permissão para adicionar lançamentos neste projeto.</p>
         </div>
       </main>
     );
@@ -327,6 +330,11 @@ export default function StatementImportView({
         ) : (
           <p className="import-context">Importando para: <strong>Finanças Gerais</strong></p>
         )}
+        {selectedMonth && selectedYear ? (
+          <p className="import-hint import-hint--period">
+            Datas sem ano no extrato usam o período selecionado: {String(selectedMonth).padStart(2, '0')}/{selectedYear}
+          </p>
+        ) : null}
         <p className="import-hint">Limite: {MAX_PDF_SIZE_BYTES / (1024 * 1024)} MB por arquivo • Apenas .pdf • Texto selecionável (sem OCR)</p>
       </div>
 
@@ -448,7 +456,7 @@ export default function StatementImportView({
               </thead>
               <tbody>
                 {visibleRows.map((row) => (
-                  <tr key={row.id} className={row.isDuplicate ? 'import-row--duplicate' : ''}>
+                  <tr key={row.id} className={row.isDuplicate || row.isPossibleDuplicate ? 'import-row--duplicate' : ''}>
                     <td>
                       <input
                         type="checkbox"
@@ -475,6 +483,9 @@ export default function StatementImportView({
                         onChange={(e) => updateRow(row.id, { description: e.target.value })}
                       />
                       {row.isDuplicate ? <span className="import-dup-badge">Duplicada</span> : null}
+                      {row.isPossibleDuplicate && !row.isDuplicate ? (
+                        <span className="import-dup-badge import-dup-badge--possible">Possível duplicada</span>
+                      ) : null}
                     </td>
                     <td>
                       <input

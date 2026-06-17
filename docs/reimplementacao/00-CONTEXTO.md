@@ -15,12 +15,15 @@ Inclui (não reaplicar do zero):
 | Área | Descrição |
 |------|-----------|
 | Schema categorias v2 | `{ id, name }`, migração Firestore, `categoryId` em transações |
-| Recorrências | Clones automáticos de meses faltantes |
-| Refatoração | Views, hooks, utils extraídos do `App.jsx` |
+| Orçamentos v2 | `budgetModel.js` — `limits` + `limitsByName`, migração automática |
+| Recorrências | `recurrenceService.js` persiste clones no Firestore |
+| Refatoração Fase 3 | `MainShell`, chat (`useChatAssistant`), modais, `App.jsx` ~1.380 linhas |
+| Categorias compartilhadas | Leitura do dono do projeto; edição só owner/manage |
+| Detecção de categoria | `categoryDetection.js` (chat + import PDF) |
 | RBAC Firestore | Permissões granulares por papel no projeto |
-| Testes | Vitest + `financeCalculations.test.js` |
+| Testes | Vitest — 21 testes |
 | Resiliência | `ErrorBoundary` |
-| Docs | `DOCUMENTACAO.md` |
+| Docs | `DOCUMENTACAO.md`, pasta `docs/reimplementacao/` |
 
 ## Causa raiz conhecida: `?` na UI
 

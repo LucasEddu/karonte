@@ -1,8 +1,26 @@
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { parseStatementText } from '../utils/statementParser';
+import { parseStatementText, parseMultipleStatementTexts } from '../utils/statementParser';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+let pdfjsReady;
+
+const getPdfJs = async () => {
+  if (pdfjsReady) return pdfjsReady;
+
+  if (typeof window === 'undefined') {
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      '../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+      import.meta.url
+    ).href;
+    pdfjsReady = pdfjsLib;
+    return pdfjsReady;
+  }
+
+  const pdfjsLib = await import('pdfjs-dist');
+  const worker = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = worker;
+  pdfjsReady = pdfjsLib;
+  return pdfjsReady;
+};
 
 export const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024;
 export const MIN_CHARS_PER_PAGE = 25;
@@ -25,8 +43,9 @@ export const getImportErrorMessage = (code) => {
     case IMPORT_ERRORS.PASSWORD:
       return 'Este PDF está protegido por senha e não pode ser lido.';
     case IMPORT_ERRORS.SCANNED:
+      return 'PDF sem texto extraível. OCR não suportado nesta versão.';
     case IMPORT_ERRORS.NO_TEXT:
-      return 'Não foi possível extrair texto deste PDF. PDFs escaneados ou baseados em imagem ainda não são suportados nesta versão (sem OCR).';
+      return 'Não foi possível extrair texto deste PDF.';
     case IMPORT_ERRORS.NO_TRANSACTIONS:
       return 'Nenhuma transação foi detectada neste extrato.';
     default:
@@ -52,9 +71,12 @@ export const extractTextFromPdf = async (file) => {
     throw err;
   }
 
+  const pdfjsLib = await getPdfJs();
+
   let buffer;
   try {
-    buffer = await file.arrayBuffer();
+    const raw = await file.arrayBuffer();
+    buffer = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
   } catch {
     const err = new Error(IMPORT_ERRORS.NO_TEXT);
     err.code = IMPORT_ERRORS.NO_TEXT;
@@ -85,7 +107,17 @@ export const extractTextFromPdf = async (file) => {
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item) => item.str).join(' ');
+    let lastY = null;
+    const parts = [];
+    for (const item of textContent.items) {
+      const y = item.transform?.[5];
+      if (lastY !== null && y !== undefined && Math.abs(y - lastY) > 4) {
+        parts.push('\n');
+      }
+      parts.push(item.str);
+      if (y !== undefined) lastY = y;
+    }
+    const pageText = parts.join(' ');
     pageTexts.push(pageText);
     totalChars += pageText.replace(/\s/g, '').length;
   }
@@ -126,7 +158,13 @@ export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parse
     onFileProgress?.(i, 'processing', file.name);
 
     try {
-      const transactions = await parsePdfFile(file, parseOptions);
+      const text = await extractTextFromPdf(file);
+      const transactions = parseStatementText(text, parseOptions);
+      if (transactions.length === 0) {
+        const err = new Error(IMPORT_ERRORS.NO_TRANSACTIONS);
+        err.code = IMPORT_ERRORS.NO_TRANSACTIONS;
+        throw err;
+      }
       results.push({
         fileName: file.name,
         status: 'done',
@@ -151,3 +189,5 @@ export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parse
 
   return results;
 };
+
+export { parseMultipleStatementTexts };

@@ -41,12 +41,12 @@ npm run build   # PWA + pdfjs chunk separado
 
 ## O que ainda vive no `App.jsx`
 
-- Shell (sidebar, mobile nav, top-bar, notificações)
-- Chatbot FAB + parser + voz
-- Modais: projeto, tarefa, pagamento, orçamento
-- Handlers de auth, projetos, convites, categorias
-- `HubView` ainda importado de `components/` (não `views/`)
+- Auth (`onAuthStateChanged`), loading e roteamento de views
+- Fetch de dados (transações, orçamentos, categorias, cartões, tarefas)
+- Handlers de negócio (CRUD, convites, categorias, export CSV)
+- Composição: `MainShell` + views + modais + `ChatAssistant` + `TransactionDrawer`
+- `HubView` ainda em `components/` (não `views/`)
 
 ## Próximo passo
 
-Ver [08-FASE-3.md](./08-FASE-3.md).
+Fase **3.6** (infra opcional): ver [08-FASE-3.md](./08-FASE-3.md).

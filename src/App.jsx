@@ -1370,6 +1370,8 @@ function App() {
               canAddToProject={canAddToProject}
               onImportTransactions={handleStatementImport}
               formatMoney={formatMoney}
+              selectedMonth={selectedMonth}
+              selectedYear={selectedYear}
             />
           </Suspense>
         )}

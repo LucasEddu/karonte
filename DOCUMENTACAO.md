@@ -44,7 +44,7 @@ O **Karonte** é um aplicativo web de finanças pessoais com suporte a **projeto
 | **Administração** | Painel admin para gestão de usuários (bloqueio, reset de senha, edição de username) |
 | **Mobile** | UI responsiva + PWA instalável; shell Android via Capacitor |
 
-A lógica principal está concentrada em `src/App.jsx` (~3.500 linhas). Dois componentes foram extraídos: `HubView` e `TransactionDrawer`.
+A lógica de orquestração permanece em `src/App.jsx` (~1.380 linhas): auth, estado global, handlers e composição de telas. Layout (`MainShell`), chat (`useChatAssistant` + `ChatAssistant`), modais e views estão extraídos.
 
 ---
 
@@ -98,16 +98,39 @@ karonte/
 │
 ├── src/
 │   ├── main.jsx             ← Bootstrap React + registro PWA
-│   ├── App.jsx              ← Monólito: estado, lógica, telas, admin
+│   ├── App.jsx              ← Orquestração: estado, handlers, composição
 │   ├── App.css              ← Estilos do app
 │   ├── index.css            ← Design tokens (tema claro/escuro)
 │   │
 │   ├── config/
 │   │   └── firebase.js      ← Inicialização Firebase (auth, db)
 │   │
+│   ├── constants/
+│   │   └── categories.js    ← Categorias padrão e classificações 50-30-20
+│   │
+│   ├── hooks/
+│   │   ├── usePermissions.js
+│   │   ├── useFinanceDerived.js
+│   │   └── useChatAssistant.js
+│   │
+│   ├── views/
+│   │   ├── MainShell.jsx    ← Sidebar, header mobile, nav, top-bar
+│   │   ├── LoadingView.jsx, AuthView.jsx, AdminApp.jsx
+│   │   ├── UserSettingsView.jsx, ProjectSettingsView.jsx
+│   │   ├── BudgetsView.jsx, TasksView.jsx
+│   │   └── (import lazy) StatementImportView em components/
+│   │
 │   ├── components/
-│   │   ├── HubView.jsx      ← Dashboard / Visão Geral
-│   │   └── TransactionDrawer.jsx  ← Drawer de novo lançamento
+│   │   ├── HubView.jsx, TransactionDrawer.jsx, ChatAssistant.jsx
+│   │   ├── ProjectSelectorDropdown.jsx, NotificationsDropdown.jsx
+│   │   ├── ErrorBoundary.jsx
+│   │   └── modals/          ← Budget, Project, Task, Payment, DeleteProject
+│   │
+│   ├── utils/
+│   │   ├── categoryModel.js, budgetModel.js, categoryDetection.js
+│   │   ├── chatParser.js, financeCalculations.js, money.js
+│   │   ├── taskCalculations.js, statementParser.js
+│   │   └── __tests__/       ← Vitest (21 testes)
 │   │
 │   └── services/            ← Camada de acesso ao Firestore
 │       ├── authService.js
@@ -131,8 +154,11 @@ karonte/
 |--------|------------------|
 | `src/config/` | Configuração de infraestrutura (Firebase) |
 | `src/services/` | CRUD Firestore, sem lógica de UI |
-| `src/components/` | Componentes reutilizáveis de UI (Hub, Drawer) |
-| `src/App.jsx` | Estado global, cálculos, permissões, fluxos, admin, chat |
+| `src/views/` | Telas de rota e shell de layout (`MainShell`) |
+| `src/hooks/` | Permissões, cálculos derivados, assistente de chat |
+| `src/utils/` | Modelos de domínio, parsers, cálculos puros |
+| `src/components/` | UI reutilizável (Hub, drawer, chat, modais, dropdowns) |
+| `src/App.jsx` | Estado global, handlers, composição de views e serviços |
 | `src/index.css` | Variáveis CSS de tema (`--primary-color`, etc.) |
 | `firestore.rules` | Autorização no backend |
 | `public/` + PWA | Assets e instalabilidade mobile |
@@ -145,9 +171,12 @@ karonte/
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser / PWA / Capacitor WebView                          │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  App.jsx (estado, cálculos, permissões, fluxos)       │  │
-│  │    ├── HubView.jsx                                    │  │
-│  │    └── TransactionDrawer.jsx                          │  │
+│  │  App.jsx (estado, handlers, composição)                 │  │
+│  │    ├── MainShell.jsx (layout)                           │  │
+│  │    ├── views/* (Auth, Hub via HubView, Budgets, …)      │  │
+│  │    ├── ChatAssistant + useChatAssistant                 │  │
+│  │    ├── modals/* (orçamento, projeto, tarefa, …)         │  │
+│  │    └── TransactionDrawer.jsx                            │  │
 │  └───────────────────────┬─────────────────────────────┘  │
 │                          │                                   │
 │  ┌───────────────────────▼─────────────────────────────┐  │
@@ -220,9 +249,13 @@ karonte/
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
-| `{categoria}` | number | Limite por categoria (mapa dinâmico) |
+| `schemaVersion` | number | `2` (schema atual) |
+| `limits` | map | `{ categoryId: number }` — limites por ID de categoria |
+| `limitsByName` | map | `{ "Alimentação": number }` — compatibilidade e UI |
 | `ownerId` | string? | Dono do orçamento (projetos compartilhados) |
 | `projectId` | string? | Projeto associado |
+
+Documentos legados com chaves `{categoria}: number` no nível raiz são migrados automaticamente em `getUserBudgets`.
 
 **ID do documento:** `{uid}` (Geral) ou `{ownerUid}_{projectId}` (projeto)
 
@@ -282,9 +315,10 @@ karonte/
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
-| `expense` | string[] | Categorias de despesa |
-| `income` | string[] | Categorias de receita |
-| `classifications` | map | `{ categoria: 'needs' \| 'wants' \| 'savings' }` para regra 50-30-20 |
+| `expense` | object[] | Categorias de despesa `{ id, name }` (schema v2) |
+| `income` | object[] | Categorias de receita `{ id, name }` |
+| `classificationsById` | map | `{ categoryId: 'needs' \| 'wants' \| 'savings' }` |
+| `classifications` | map | Legado por nome — regravado no save para compat |
 
 ### `creditCards/{id}`
 
@@ -297,12 +331,15 @@ karonte/
 | `closingDay` | number | Dia de fechamento (1–31) |
 | `dueDay` | number | Dia de vencimento |
 
-### `insights/{userId}_{month}_{year}`
+### `insights/{userId}_{scope}_{month}_{year}`
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | `text` | string | Texto do insight mensal |
 | `createdAt` | ISO string | Cache |
+| `projectId` | string? | `null` = Geral; ID do projeto quando escopo compartilhado |
+
+ID do documento: `buildInsightCacheId(uid, month, year, projectId)` → `{uid}_{geral\|projectId}_{month}_{year}`.
 
 > **Atenção:** A coleção `insights` **não possui regra explícita** em `firestore.rules` e é bloqueada pela regra catch-all. O cache de insights pode falhar em produção até adicionar regras.
 
@@ -400,7 +437,7 @@ karonte/
 
 | Função | Descrição |
 |--------|-----------|
-| `getProjectTasks(userId, projectId)` | Tarefas do projeto |
+| `getProjectTasks(projectId)` | Tarefas de todos os membros do projeto |
 | `addTask(projectId, payload)` | Cria tarefa/despesa |
 | `updateTask(taskId, data)` | Atualização parcial |
 | `deleteTask(taskId)` | Remove tarefa |
@@ -426,8 +463,9 @@ karonte/
 
 | Função | Descrição |
 |--------|-----------|
-| `getCachedInsight(userId, month, year)` | Lê cache mensal |
-| `saveInsightToCache(userId, month, year, text)` | Salva cache |
+| `buildInsightCacheId(userId, month, year, projectId?)` | Monta ID do doc de cache |
+| `getCachedInsight(userId, month, year, projectId?)` | Lê cache mensal por escopo |
+| `saveInsightToCache(userId, month, year, text, projectId?)` | Salva cache |
 
 ---
 
@@ -461,13 +499,34 @@ Drawer lateral com:
 - Despesa: pagamento avulso ou cartão; parcelas (2–24x); recorrente mensal
 - Gerenciador de categorias customizadas (com classificação 50-30-20)
 
-### Inline em `App.jsx`
+### `MainShell.jsx` — Layout principal
 
-| Peça | Função |
-|------|--------|
-| `ErrorBoundary` | Captura erros React; tela de crash com reload |
-| `App` | Aplicação completa |
-| `AppWrapper` | Export default com `ErrorBoundary` |
+Sidebar (desktop), header e bottom nav (mobile), top-bar com seletor de projeto, notificações e avatar. Recebe `currentView`, `onNavigate`, slots de conteúdo e props de projeto/usuário.
+
+### `ChatAssistant.jsx` + `useChatAssistant`
+
+FAB do assistente, histórico de mensagens, entrada de texto e voz. Lógica de parser em `src/utils/chatParser.js`; inferência de categoria compartilhada com import PDF em `src/utils/categoryDetection.js`.
+
+### Modais (`src/components/modals/`)
+
+| Modal | Função |
+|-------|--------|
+| `BudgetModal` | Definir limites por categoria |
+| `ProjectModal` | Criar projeto |
+| `DeleteProjectModal` | Confirmar exclusão |
+| `TaskModal` | Nova tarefa/despesa |
+| `PaymentModal` | Registrar pagamento de tarefa |
+
+### Dropdowns
+
+| Componente | Função |
+|------------|--------|
+| `ProjectSelectorDropdown` | Geral + projetos do usuário |
+| `NotificationsDropdown` | Convites e notificações |
+
+### `ErrorBoundary.jsx`
+
+Captura erros React; tela de crash com reload. Export default via `AppWrapper` em `App.jsx`.
 
 ---
 
@@ -542,9 +601,11 @@ canDeleteInProject =
   !activeProjectId OU role ∈ { owner, manage }
 ```
 
-### Orçamentos em projetos compartilhados
+### Orçamentos e categorias em projetos compartilhados
 
-O documento de orçamento usa o **UID do dono do projeto** (`activeProject.userId`), não do colaborador.
+- Orçamento e categorias usam o **UID do dono do projeto** (`activeProject.userId`), não do colaborador.
+- Edição de categorias: apenas dono ou papel `manage` (`canEditCategories`).
+- Limites gravados em schema v2 (`limits` por `categoryId` + `limitsByName` para compat).
 
 ---
 
@@ -839,16 +900,15 @@ isCurrentPeriod = selectedMonth === mês atual E selectedYear === ano atual
 date = isCurrentPeriod ? agora : new Date(selectedYear, selectedMonth-1, 1, 12:00)
 ```
 
-**Clone de recorrentes (no login, apenas em memória):**
+**Clone de recorrentes (`recurrenceService.persistMissingRecurrences`):**
+
 ```
-para cada transação isRecurring do usuário em meses passados:
-  enquanto mês < mês atual:
-    se não existe clone (parentId + mês/ano alvo):
-      clonar com novo id, parentId = rt.parentId || rt.id
-      ajustar dia: min(dia original, dias no mês alvo)
+para cada transação isRecurring (raiz) do usuário:
+  para cada mês faltante até o mês atual:
+    buildRecurrenceClone → addTransaction no Firestore
 ```
 
-> Clones recorrentes atualizam apenas `setTransactions` local — **não são persistidos** automaticamente no Firestore neste efeito.
+Clones são **persistidos** via `addTransaction`; o App recarrega transações após o efeito.
 
 ---
 
@@ -865,6 +925,8 @@ para cada transação isRecurring do usuário em meses passados:
 ---
 
 ## 12. Assistente (chatbot)
+
+Implementação: `useChatAssistant` + `ChatAssistant.jsx`; parser em `chatParser.js`.
 
 ### Detecção de voz
 
@@ -893,13 +955,13 @@ hasSpeechSupport = window.SpeechRecognition || window.webkitSpeechRecognition
 2. **Data relativa:** `ontem`, `anteontem`, dias da semana
 3. **Descrição:** texto limpo removendo valor, stopwords e datas
 4. **Tipo:** palavras-chave de receita → `income`; senão `expense`
-5. **Categoria:** mapa de regex (Alimentação, Moradia, etc.) + categorias customizadas
+5. **Categoria:** `categoryDetection.js` (regex + categorias customizadas; mesma lógica do import PDF)
 6. **Alerta de orçamento:** se gasto projetado ultrapassa 80% ou 100% do limite
 
 ### Confirmação
 
 - Resposta `type: 'action'` → entra em `pendingActions`
-- Usuário confirma com `sim`/`s` → `handleChatConfirm` → `addTransaction`
+- Usuário confirma com `sim`/`s` → `handleChatConfirm` → `addTransaction` (com `activeProjectId`)
 - Correção de valor ou campos antes de confirmar suportada
 
 ---
@@ -914,8 +976,8 @@ balance = income - expense
 topCategory = categoria com maior gasto
 ```
 
-**`generateAIInsight(month, year)`:**
-1. Verifica cache em `insights/{uid}_{month}_{year}`
+**`generateAIInsight(month, year, projectId?)`:**
+1. Verifica cache em `insights/{uid}_{scope}_{month}_{year}`
 2. Se sem dados → mensagem padrão
 3. Gera texto por **template** (não chama LLM externa)
 4. Salva no cache
@@ -1071,7 +1133,7 @@ Arquivo: `.env.local` (não versionado)
 | `[currentUser]` | Projetos, convites, notificações |
 | `[currentUser, activeProjectId]` | Tarefas do projeto |
 | `[currentUser, activeProjectId, projects]` | Transações, orçamentos, categorias, cartões, usuários (admin) |
-| `[currentUser]` (2º) | Clone local de recorrentes |
+| `[currentUser]` (2º) | `persistMissingRecurrences` para lançamentos recorrentes |
 | `[chatOpen, transactions]` | Alerta proativo de previsão alta no chat |
 | `[currentUser, transactions.length, dataLoading]` | Insight mensal automático |
 
@@ -1103,25 +1165,36 @@ Arquivo: `.env.local` (não versionado)
 | `categoryId` nas transações | `buildTransactionCategoryFields()` e `resolveCategoryForTransaction()` em `categoryModel.js`; usado em `handleAddTransaction` e `handleChatConfirm` |
 | Snapshot de categoria | Transações gravam `categoryId`, `categoryName` e `category` (nome legado) |
 | Labels em relatórios | `getTransactionCategoryLabel()` prioriza `categoryName` |
-| Testes | 12 testes (inclui `buildTransactionCategoryFields`) |
+| Testes | 21 testes Vitest (`financeCalculations`, `categoryDetection`, `budgetModel`, recorrências) |
 
-### Pendente (Fase 3+)
+### Fase 3 — Concluída (exceto 3.6 infra)
 
-Roadmap detalhado: [`docs/reimplementacao/08-FASE-3.md`](docs/reimplementacao/08-FASE-3.md)  
+| Item | Implementação |
+|------|----------------|
+| Limpeza modais mortos | Convite/rename só em `ProjectSettingsView` (3.1) |
+| Chat extraído | `chatParser.js`, `useChatAssistant`, `ChatAssistant` (3.2) |
+| Layout | `MainShell`, `ProjectSelectorDropdown`, `NotificationsDropdown` (3.3) |
+| Orçamentos v2 | `budgetModel.js`, `limits` + `limitsByName`, migração em `budgetService` (3.4) |
+| Modais | `src/components/modals/*` (3.5) |
+| Categorias compartilhadas | Leitura do dono; `canEditCategories` para edição |
+| Tarefas de projeto | `getProjectTasks(projectId)` — todos os membros |
+| Detecção de categoria | `categoryDetection.js` (chat + PDF) |
+| `App.jsx` | ~1.380 linhas (orquestração: auth, fetch, handlers, composição) |
+
+### Pendente (Fase 3.6+)
+
+Roadmap: [`docs/reimplementacao/08-FASE-3.md`](docs/reimplementacao/08-FASE-3.md)  
 Status: [`docs/reimplementacao/07-STATUS.md`](docs/reimplementacao/07-STATUS.md)
 
 | Item | Status |
 |------|--------|
-| Extrair chat/modais para hooks ou views | `useChatAssistant` — pendente (3.2) |
-| `categoryId` em orçamentos | Pendente (3.4) |
-| Orçamentos como estrutura auditável | Pendente (3.4) |
-| Centralizar `notifications` | Pendente (3.6) |
+| Centralizar UI de notificações | Pendente (3.6) |
 | `dueDate` em tarefas | Pendente (3.6) |
 | Export PDF/Excel | Pendente (3.6) |
 | Cloud Functions para recorrências | Pendente (3.6) |
-| ~~Remover modais mortos~~ | ✅ Concluído (3.1) |
 | Sentry / Analytics | Pendente (3.6) |
 | iOS Capacitor / remover `server.url` dev | Pendente (3.6) |
+| Mover `HubView` para `views/` | Opcional |
 
 ### Estrutura atual de `src/`
 
@@ -1130,22 +1203,24 @@ src/
 ├── constants/categories.js
 ├── hooks/
 │   ├── useFinanceDerived.js
-│   └── usePermissions.js
+│   ├── usePermissions.js
+│   └── useChatAssistant.js
 ├── views/
-│   ├── AdminApp.jsx
-│   ├── AuthView.jsx
-│   ├── BudgetsView.jsx
-│   ├── LoadingView.jsx
-│   ├── ProjectSettingsView.jsx
-│   ├── TasksView.jsx
-│   └── UserSettingsView.jsx
+│   ├── MainShell.jsx
+│   ├── AdminApp.jsx, AuthView.jsx, BudgetsView.jsx
+│   ├── LoadingView.jsx, ProjectSettingsView.jsx
+│   ├── TasksView.jsx, UserSettingsView.jsx
+├── components/
+│   ├── HubView.jsx, TransactionDrawer.jsx, ChatAssistant.jsx
+│   ├── ProjectSelectorDropdown.jsx, NotificationsDropdown.jsx
+│   ├── ErrorBoundary.jsx
+│   └── modals/ (Budget, Project, Task, Payment, DeleteProject)
 ├── utils/
-│   ├── categoryModel.js
-│   ├── financeCalculations.js
-│   ├── money.js
-│   ├── taskCalculations.js
-│   └── __tests__/financeCalculations.test.js
-├── services/recurrenceService.js
-└── components/ErrorBoundary.jsx
+│   ├── categoryModel.js, budgetModel.js, categoryDetection.js
+│   ├── chatParser.js, financeCalculations.js, money.js
+│   ├── taskCalculations.js, statementParser.js
+│   └── __tests__/ (21 testes)
+├── services/ (auth, transactions, budgets, categories, …)
+└── App.jsx (~1.380 linhas)
 ```
 
