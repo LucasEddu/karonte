@@ -17,6 +17,7 @@ export function useFinanceDerived({
   selectedYear,
   expenseCategories,
   classifications,
+  customCategories,
 }) {
   const filteredTransactions = useMemo(
     () => filterTransactionsByPeriod(transactions, selectedMonth, selectedYear),
@@ -41,8 +42,8 @@ export function useFinanceDerived({
   const totalBudgetLimit = useMemo(() => computeTotalBudgetLimit(budgets), [budgets]);
 
   const budgetStats = useMemo(
-    () => computeBudgetStats(filteredTransactions, budgets, expenseCategories),
-    [filteredTransactions, budgets, expenseCategories]
+    () => computeBudgetStats(filteredTransactions, budgets, expenseCategories, customCategories),
+    [filteredTransactions, budgets, expenseCategories, customCategories]
   );
 
   const ruleStats = useMemo(

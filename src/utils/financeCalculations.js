@@ -1,4 +1,6 @@
 import { DEFAULT_CLASSIFICATIONS } from '../constants/categories.js';
+import { resolveCategoryForTransaction } from './categoryModel.js';
+import { getBudgetLimitByCategory, normalizeBudgets } from './budgetModel.js';
 
 export const getTransactionCategoryLabel = (transaction) =>
   transaction.categoryName || transaction.category || 'Outros';
@@ -56,14 +58,17 @@ export const computeMonthlyEvolution = (transactions, referenceDate = new Date()
   return data;
 };
 
-export const computeTotalBudgetLimit = (budgets) =>
-  Object.values(budgets).reduce((sum, val) => sum + (Number(val) || 0), 0);
+export const computeTotalBudgetLimit = (budgets) => {
+  const { limitsByName } = normalizeBudgets(budgets);
+  return Object.values(limitsByName).reduce((sum, val) => sum + (Number(val) || 0), 0);
+};
 
-export const computeBudgetStats = (filteredTransactions, budgets, expenseCategories) => {
+export const computeBudgetStats = (filteredTransactions, budgets, expenseCategories, customCategories = {}) => {
   const expenses = filteredTransactions.filter((t) => t.type === 'expense');
   return expenseCategories
     .map((cat) => {
-      const limit = budgets[cat] || 0;
+      const { categoryId } = resolveCategoryForTransaction(cat, 'expense', customCategories);
+      const limit = getBudgetLimitByCategory(budgets, categoryId, cat);
       const spent = expenses
         .filter((t) => getTransactionCategoryLabel(t) === cat)
         .reduce((sum, item) => sum + item.amount, 0);
@@ -74,8 +79,10 @@ export const computeBudgetStats = (filteredTransactions, budgets, expenseCategor
     .sort((a, b) => b.spent - a.spent);
 };
 
-export const getCategoryBudgetInfo = (budgets, catName, currentSpent) => {
-  const limit = budgets[catName] || 0;
+export const getCategoryBudgetInfo = (budgets, catName, currentSpent, categoryId = null) => {
+  const limit = categoryId
+    ? getBudgetLimitByCategory(budgets, categoryId, catName)
+    : getBudgetLimitByCategory(budgets, null, catName);
   if (limit === 0) return { limit: 0, pct: 0, isOver80: false, isOver100: false };
   const pct = (currentSpent / limit) * 100;
   return {

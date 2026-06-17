@@ -33,7 +33,9 @@ Removidos de `App.jsx` (2026-06-17):
 
 **Critério de aceite:** navegação entre hub, orçamentos, tarefas, import inalterada.
 
-## 3.4 Orçamentos com `categoryId` (médio/alto risco)
+## 3.4 Orçamentos com `categoryId` (médio/alto risco) — concluída ✅
+
+Schema v2 em `budgetModel.js` + migração automática em `budgetService.js`. Limites gravados em `limits` (por id) e `limitsByName` (compat).
 
 Hoje: `budgets` = `{ "Alimentação": 500, ownerId, projectId }`.
 

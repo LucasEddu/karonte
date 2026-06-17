@@ -39,6 +39,7 @@ export default function TransactionDrawer({
   setNewCatClassification,
   handleAddCustomCategory,
   catSaving,
+  canEditCategories = true,
 }) {
   if (!open) return null;
 
@@ -208,6 +209,8 @@ export default function TransactionDrawer({
             <button type="submit" className="submit-btn transaction-drawer-submit">Registrar lançamento</button>
           </form>
 
+          {canEditCategories ? (
+          <>
           <div className="cat-manager-toggle" onClick={() => setShowCatManager(!showCatManager)}>
             <span>{showCatManager ? '▾' : '▸'} Gerenciar categorias personalizadas</span>
           </div>
@@ -219,22 +222,26 @@ export default function TransactionDrawer({
                   <h4>Despesas</h4>
                   <div className="cat-chips">
                     {customCategories.expense.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                    {customCategories.expense.map(cat => (
-                      <span key={cat} className="cat-chip">
-                        <span>{cat}</span> <button type="button" onClick={() => handleRemoveCustomCategory(cat, 'expense')}>×</button>
+                    {customCategories.expense.map(cat => {
+                      const label = typeof cat === 'string' ? cat : cat.name;
+                      return (
+                      <span key={label} className="cat-chip">
+                        <span>{label}</span> <button type="button" onClick={() => handleRemoveCustomCategory(label, 'expense')}>×</button>
                       </span>
-                    ))}
+                    );})}
                   </div>
                 </div>
                 <div style={{ marginTop: 15 }}>
                   <h4>Receitas</h4>
                   <div className="cat-chips">
                     {customCategories.income.length === 0 ? <span className="no-cats">Nenhuma personalizada</span> : null}
-                    {customCategories.income.map(cat => (
-                      <span key={cat} className="cat-chip">
-                        <span>{cat}</span> <button type="button" onClick={() => handleRemoveCustomCategory(cat, 'income')}>×</button>
+                    {customCategories.income.map(cat => {
+                      const label = typeof cat === 'string' ? cat : cat.name;
+                      return (
+                      <span key={label} className="cat-chip">
+                        <span>{label}</span> <button type="button" onClick={() => handleRemoveCustomCategory(label, 'income')}>×</button>
                       </span>
-                    ))}
+                    );})}
                   </div>
                 </div>
               </div>
@@ -267,6 +274,8 @@ export default function TransactionDrawer({
               </div>
             </div>
           )}
+          </>
+          ) : null}
         </div>
       </aside>
     </div>

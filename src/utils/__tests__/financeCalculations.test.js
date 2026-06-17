@@ -75,7 +75,7 @@ describe('computePeriodTotals', () => {
 
 describe('getCategoryBudgetInfo', () => {
   it('marca alertas em 80% e 100%', () => {
-    const budgets = { Alimentação: 100 };
+    const budgets = { limitsByName: { Alimentação: 100 }, limits: {}, schemaVersion: 2 };
     expect(getCategoryBudgetInfo(budgets, 'Alimentação', 50)).toEqual({
       limit: 100,
       pct: 50,

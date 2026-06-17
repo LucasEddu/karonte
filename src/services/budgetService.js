@@ -1,25 +1,25 @@
 import { db, auth } from '../config/firebase';
-import { 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc 
-} from 'firebase/firestore';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import {
+  normalizeBudgets,
+  needsBudgetMigration,
+  serializeBudgetsForSave,
+  EMPTY_BUDGETS,
+} from '../utils/budgetModel';
 
 export const saveUserBudgets = async (budgetsData, projectId = null, ownerId = null) => {
   try {
     const user = auth.currentUser;
-    if (!user) throw new Error("No authenticated user");
+    if (!user) throw new Error('No authenticated user');
 
-    // We will save user budgets as a single document under 'budgets' collection with the ID = user.uid + _ + projectId
-    // If it's the general budget, just use user.uid. Store projectId/ownerId for shared-project rules.
     const uid = ownerId || user.uid;
     const docId = projectId ? `${uid}_${projectId}` : uid;
-    const payload = { ...budgetsData, ownerId: uid, projectId: projectId || null };
+    const serialized = serializeBudgetsForSave(budgetsData);
+    const payload = { ...serialized, ownerId: uid, projectId: projectId || null };
     await setDoc(doc(db, 'budgets', docId), payload);
-    return budgetsData;
+    return normalizeBudgets(payload);
   } catch (error) {
-    console.error("Error saving budgets:", error);
+    console.error('Error saving budgets:', error);
     throw error;
   }
 };
@@ -30,15 +30,24 @@ export const getUserBudgets = async (userId, projectId = null) => {
     const docRef = doc(db, 'budgets', docId);
     const docSnap = await getDoc(docRef);
 
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      const { ownerId, projectId: _p, ...budgets } = data;
-      return budgets;
-    } else {
-      return {}; // No budgets defined yet
+    if (!docSnap.exists()) {
+      return { ...EMPTY_BUDGETS };
     }
+
+    const raw = docSnap.data();
+    const normalized = normalizeBudgets(raw);
+
+    if (needsBudgetMigration(raw)) {
+      await setDoc(docRef, {
+        ...serializeBudgetsForSave(normalized),
+        ownerId: raw.ownerId || userId,
+        projectId: raw.projectId ?? projectId ?? null,
+      });
+    }
+
+    return normalized;
   } catch (error) {
-    console.error("Error fetching budgets:", error);
+    console.error('Error fetching budgets:', error);
     throw error;
   }
 };

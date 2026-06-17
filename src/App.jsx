@@ -19,7 +19,8 @@ import { createInvite, getInvitesByEmail, acceptInvite, rejectInvite } from './s
 import { getNotifications, markNotificationRead } from './services/notificationService';
 import { persistMissingRecurrences } from './services/recurrenceService';
 import { DEFAULT_EXPENSE_CATS, DEFAULT_INCOME_CATS } from './constants/categories';
-import { mergeCategoryNames, getClassificationsByName, createCategoryItem, buildTransactionCategoryFields } from './utils/categoryModel';
+import { mergeCategoryNames, getClassificationsByName, createCategoryItem, buildTransactionCategoryFields, resolveCategoryForTransaction } from './utils/categoryModel';
+import { EMPTY_BUDGETS, setBudgetLimit, getBudgetLimitByName } from './utils/budgetModel';
 import { formatMoney, parseMoneyInput } from './utils/money';
 import { getCategoryBudgetInfo, getCardInvoiceStats, getTransactionCategoryLabel } from './utils/financeCalculations';
 import { inferCategory as inferCategoryFromText, findCustomCategoryInText } from './utils/categoryDetection';
@@ -115,7 +116,7 @@ function App() {
   };
 
   // --------- STATE: BUDGETS & GOALS ---------
-  const [budgets, setBudgets] = useState({});
+  const [budgets, setBudgets] = useState({ ...EMPTY_BUDGETS });
   const [budgetModalOpen, setBudgetModalOpen] = useState(false);
   const [activeBudgetCat, setActiveBudgetCat] = useState('');
   const [budgetInputValue, setBudgetInputValue] = useState('');
@@ -271,7 +272,7 @@ function App() {
         setCurrentUser(null);
         setAuthLoading(false);
         setTransactions([]);
-        setBudgets({});
+        setBudgets({ ...EMPTY_BUDGETS });
         setCustomCategories({ expense: [], income: [], classifications: {} });
         setCreditCards([]);
       }
@@ -351,7 +352,7 @@ function App() {
       return;
     }
     setTasksLoading(true);
-    getProjectTasks(currentUser.uid, activeProjectId)
+    getProjectTasks(activeProjectId)
       .then(setTasks)
       .catch(console.error)
       .finally(() => setTasksLoading(false));
@@ -416,9 +417,13 @@ function App() {
        try {
          let txs;
          let budgetOwnerId = currentUser.uid;
+         const activeProject = activeProjectId
+           ? projects.find((p) => p.id === activeProjectId)
+           : null;
+         if (activeProject) budgetOwnerId = activeProject.userId;
+         const categoryOwnerId = budgetOwnerId;
+
          if (activeProjectId) {
-           const activeProject = projects.find(p => p.id === activeProjectId);
-           if (activeProject) budgetOwnerId = activeProject.userId;
            txs = await getProjectTransactions(activeProjectId);
          } else {
            txs = await getUserTransactions(currentUser.uid, null);
@@ -428,7 +433,7 @@ function App() {
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
          setBudgets(userBudgets);
 
-         const cats = await getUserCategories(currentUser.uid);
+         const cats = await getUserCategories(categoryOwnerId);
          setCustomCategories(cats);
 
          const cards = await getCreditCards(currentUser.uid, activeProjectId);
@@ -773,7 +778,7 @@ function App() {
         };
         const newTask = await addTask(activeProjectId, payload);
         try {
-          const updated = await getProjectTasks(currentUser.uid, activeProjectId);
+          const updated = await getProjectTasks(activeProjectId);
           setTasks(updated);
         } catch (_) {
           setTasks(prev => [newTask, ...prev]);
@@ -837,7 +842,7 @@ function App() {
 
   // --------- DATA CALCULATIONS (hooks + utils) ---------
 
-  const { activeProjectRole, canAddToProject, canDeleteInProject } = usePermissions({
+  const { activeProjectRole, canAddToProject, canDeleteInProject, canManageProject } = usePermissions({
     activeProjectId,
     projects,
     currentUserId: currentUser?.uid,
@@ -847,6 +852,13 @@ function App() {
     () => (activeProjectId ? projects.find((p) => p.id === activeProjectId) || null : null),
     [projects, activeProjectId]
   );
+
+  const categoryOwnerId = useMemo(
+    () => activeProject?.userId ?? currentUser?.uid ?? null,
+    [activeProject, currentUser]
+  );
+
+  const canEditCategories = !activeProjectId || canManageProject;
 
   const {
     filteredTransactions,
@@ -866,10 +878,13 @@ function App() {
     selectedYear,
     expenseCategories,
     classifications: classificationsByName,
+    customCategories,
   });
 
-  const getCategoryBudgetInfoForCat = (catName, currentSpent) =>
-    getCategoryBudgetInfo(budgets, catName, currentSpent);
+  const getCategoryBudgetInfoForCat = (catName, currentSpent) => {
+    const { categoryId } = resolveCategoryForTransaction(catName, 'expense', customCategories);
+    return getCategoryBudgetInfo(budgets, catName, currentSpent, categoryId);
+  };
 
   const getCardInvoiceStatsForCard = (card, transactionsList) =>
     getCardInvoiceStats(card, transactionsList, selectedMonth, selectedYear);
@@ -913,7 +928,7 @@ function App() {
   };
   // --------- HELPERS ---------
   const handleBudgetChange = (catName) => {
-    const currentLimit = budgets[catName] || 0;
+    const currentLimit = getBudgetLimitByName(budgets, catName);
     setActiveBudgetCat(catName);
     setBudgetInputValue(currentLimit > 0 ? currentLimit.toString() : '');
     setBudgetModalOpen(true);
@@ -927,13 +942,10 @@ function App() {
     }
     
     const finalVal = isNaN(num) ? 0 : num;
-    const newBudgets = { ...budgets };
-    
-    if (finalVal === 0) delete newBudgets[activeBudgetCat];
-    else newBudgets[activeBudgetCat] = finalVal;
+    const { categoryId } = resolveCategoryForTransaction(activeBudgetCat, 'expense', customCategories);
+    const newBudgets = setBudgetLimit(budgets, activeBudgetCat, categoryId, finalVal);
 
     try {
-       const activeProject = projects.find(p => p.id === activeProjectId);
        const budgetOwnerId = activeProject?.userId ?? currentUser?.uid;
        await saveUserBudgets(newBudgets, activeProjectId, budgetOwnerId);
        setBudgets(newBudgets);
@@ -1000,6 +1012,10 @@ function App() {
   const handleAddCustomCategory = async () => {
     const name = newCatName.trim();
     if (!name || !currentUser) return;
+    if (!canEditCategories) {
+      alert('Apenas o dono do projeto pode alterar categorias compartilhadas.');
+      return;
+    }
     const allForType = newCatType === 'expense' ? expenseCategories : incomeCategories;
     if (allForType.map(c => c.toLowerCase()).includes(name.toLowerCase())) {
       alert('Esta categoria já existe.');
@@ -1020,7 +1036,7 @@ function App() {
     }
     setCatSaving(true);
     try {
-      await saveUserCategories(currentUser.uid, updated);
+      await saveUserCategories(categoryOwnerId, updated);
       setCustomCategories(updated);
       setNewCatName('');
       setShowCatManager(false);
@@ -1033,6 +1049,10 @@ function App() {
 
   const handleRemoveCustomCategory = async (catName) => {
     if (!currentUser) return;
+    if (!canEditCategories) {
+      alert('Apenas o dono do projeto pode alterar categorias compartilhadas.');
+      return;
+    }
     const updatedClassifications = { ...customCategories.classifications };
     delete updatedClassifications[catName];
     const updated = {
@@ -1048,7 +1068,7 @@ function App() {
     };
     if (category === catName) setCategory('');
     try {
-      await saveUserCategories(currentUser.uid, updated);
+      await saveUserCategories(categoryOwnerId, updated);
       setCustomCategories(updated);
     } catch(err) {
       alert('Erro ao remover categoria.');
@@ -2374,6 +2394,7 @@ function App() {
         setNewCatClassification={setNewCatClassification}
         handleAddCustomCategory={handleAddCustomCategory}
         catSaving={catSaving}
+        canEditCategories={canEditCategories}
       />
 
       {/* NEW PROJECT MODAL */}

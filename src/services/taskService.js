@@ -11,11 +11,11 @@ import {
 
 const COLLECTION_NAME = 'tasks';
 
-export const getProjectTasks = async (userId, projectId) => {
+export const getProjectTasks = async (projectId) => {
   try {
+    if (!projectId) return [];
     const q = query(
       collection(db, COLLECTION_NAME),
-      where('userId', '==', userId),
       where('projectId', '==', projectId)
     );
     const snapshot = await getDocs(q);
