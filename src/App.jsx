@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, Suspense, lazy } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from 'react';
 import './App.css';
 import HubView from './components/HubView';
 import TransactionDrawer from './components/TransactionDrawer';
@@ -8,13 +8,13 @@ const StatementImportView = lazy(() => import('./components/StatementImportView'
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
-import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction } from './services/transactionService';
+import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction, updateTransaction, deleteTransactionsByIds } from './services/transactionService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
 import { getCachedInsight, saveInsightToCache } from './services/insightService';
 import { getUserProjects, createProject, deleteProject, updateProject } from './services/projectService';
-import { getProjectTasks, addTask, updateTask, deleteTask } from './services/taskService';
+import { getProjectTasks, addTask, updateTask, deleteTask, appendTaskComment } from './services/taskService';
 import { createInvite, getInvitesByEmail, acceptInvite, rejectInvite } from './services/inviteService';
 import { getNotifications, markNotificationRead } from './services/notificationService';
 import { persistMissingRecurrences } from './services/recurrenceService';
@@ -40,6 +40,14 @@ import TaskModal from './components/modals/TaskModal';
 import PaymentModal from './components/modals/PaymentModal';
 import { useChatAssistant } from './hooks/useChatAssistant';
 import MainShell from './views/MainShell';
+import TasksView from './views/TasksView';
+import FinancialCalendarView from './views/FinancialCalendarView';
+import SubscriptionsView from './views/SubscriptionsView';
+import ActivityFeedView from './views/ActivityFeedView';
+import SavingsSimulatorView from './views/SavingsSimulatorView';
+import FamilyModeView from './views/FamilyModeView';
+import { logActivity, ACTIVITY_TYPES } from './utils/activityLog.js';
+import { DEFAULT_FAMILY_CONFIG } from './constants/projectTypes.js';
 
 function App() {
   // --------- STATE: THEME ---------
@@ -76,6 +84,12 @@ function App() {
   const [isInstallment, setIsInstallment] = useState(false);
   const [installmentTotal, setInstallmentTotal] = useState('2');
   const [installmentCurrent, setInstallmentCurrent] = useState('1');
+  const [editingTransactionId, setEditingTransactionId] = useState(null);
+  const [transactionDate, setTransactionDate] = useState(() => {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  });
 
   // --------- STATE: CUSTOM CATEGORIES ---------
   const [customCategories, setCustomCategories] = useState({ expense: [], income: [], classifications: {}, classificationsById: {} });
@@ -149,6 +163,9 @@ function App() {
   const [activeProjectId, setActiveProjectId] = useState(null); // null = Geral
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectType, setNewProjectType] = useState('default');
+  const [projectTypeInput, setProjectTypeInput] = useState('default');
+  const [familyConfigInput, setFamilyConfigInput] = useState({ ...DEFAULT_FAMILY_CONFIG });
   const [projectToDelete, setProjectToDelete] = useState(null); // { id, name } or null
   const [renameProjectValue, setRenameProjectValue] = useState('');
   const [projectSettingsId, setProjectSettingsId] = useState(null);
@@ -165,6 +182,8 @@ function App() {
   const [taskParcelaValueInput, setTaskParcelaValueInput] = useState(''); // valor da parcela (string)
   const [taskParcelasPaidInput, setTaskParcelasPaidInput] = useState(''); // parcelas já pagas (string numérica)
   const [taskSaving, setTaskSaving] = useState(false);
+  const [taskCommentInput, setTaskCommentInput] = useState('');
+  const [taskCommentSaving, setTaskCommentSaving] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [taskToPay, setTaskToPay] = useState(null);
   const [paymentAmountInput, setPaymentAmountInput] = useState('');
@@ -491,7 +510,56 @@ function App() {
     setAmount(formatted);
   };
 
-  const handleAddTransaction = async (e) => {
+  const toTransactionDateInput = (iso) => {
+    const d = new Date(iso || Date.now());
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  };
+
+  const resetTransactionForm = () => {
+    setEditingTransactionId(null);
+    setDescription('');
+    setAmount('');
+    setCategory('');
+    setType('expense');
+    setIsRecurring(false);
+    setIsInstallment(false);
+    setInstallmentTotal('2');
+    setInstallmentCurrent('1');
+    setPaymentMethod('avulsa');
+    setSelectedCardId('');
+    setShowCatManager(false);
+    const now = new Date();
+    const isCurrentPeriod = selectedMonth === now.getMonth() + 1 && selectedYear === now.getFullYear();
+    const dateRef = isCurrentPeriod ? now : new Date(selectedYear, selectedMonth - 1, 1, 12, 0, 0);
+    setTransactionDate(toTransactionDateInput(dateRef.toISOString()));
+  };
+
+  const closeTransactionDrawer = () => {
+    setShowTransactionDrawer(false);
+    resetTransactionForm();
+  };
+
+  const openTransactionForEdit = (tx) => {
+    if (!tx) return;
+    setEditingTransactionId(tx.id);
+    setDescription(tx.description || '');
+    setAmount(formatMoney(tx.amount));
+    setType(tx.type || 'expense');
+    setCategory(getTransactionCategoryLabel(tx));
+    setIsRecurring(!!tx.isRecurring);
+    setIsInstallment(!!tx.isInstallment);
+    setInstallmentTotal(String(tx.installments || 2));
+    setInstallmentCurrent(String(tx.installmentNumber || 1));
+    setPaymentMethod(tx.paymentMethod || 'avulsa');
+    setSelectedCardId(tx.cardId || '');
+    setTransactionDate(toTransactionDateInput(tx.date));
+    setShowCatManager(false);
+    setShowTransactionDrawer(true);
+  };
+
+  const handleSaveTransaction = async (e) => {
     e.preventDefault();
     if (!description || !amount || !category) return;
     
@@ -519,9 +587,12 @@ function App() {
     }
 
     const now = new Date();
-    const isCurrentPeriod = (selectedMonth === now.getMonth() + 1) && (selectedYear === now.getFullYear());
-    
-    let dateObj = isCurrentPeriod ? now : new Date(selectedYear, selectedMonth - 1, 1, 12, 0, 0); 
+    const [year, month, day] = (transactionDate || '').split('-').map(Number);
+    const dateObj = year && month && day
+      ? new Date(year, month - 1, day, 12, 0, 0)
+      : (selectedMonth === now.getMonth() + 1 && selectedYear === now.getFullYear()
+        ? now
+        : new Date(selectedYear, selectedMonth - 1, 1, 12, 0, 0));
     
     const newTransaction = {
       description,
@@ -537,28 +608,60 @@ function App() {
       newTransaction.paymentMethod = paymentMethod;
       if (paymentMethod === 'card') {
         newTransaction.cardId = selectedCardId;
+      } else {
+        newTransaction.cardId = null;
       }
       if (isInstallment) {
         newTransaction.isInstallment = true;
         newTransaction.installments = parseInt(installmentTotal, 10);
         newTransaction.installmentNumber = parseInt(installmentCurrent, 10);
+      } else {
+        newTransaction.isInstallment = false;
+        newTransaction.installments = null;
+        newTransaction.installmentNumber = null;
       }
+    } else {
+      newTransaction.isRecurring = false;
+      newTransaction.isInstallment = false;
+      newTransaction.paymentMethod = null;
+      newTransaction.cardId = null;
+      newTransaction.installments = null;
+      newTransaction.installmentNumber = null;
     }
     
     try {
+      if (editingTransactionId) {
+        const existing = transactions.find((t) => t.id === editingTransactionId);
+        const updatedPayload = {
+          ...newTransaction,
+          source: existing?.source,
+          importBatchId: existing?.importBatchId,
+          importedAt: existing?.importedAt,
+          rawDescription: existing?.rawDescription,
+          duplicateHash: existing?.duplicateHash,
+        };
+        const savedDoc = await updateTransaction(editingTransactionId, updatedPayload);
+        const merged = { ...existing, ...savedDoc };
+        setTransactions((prev) => prev.map((t) => (t.id === editingTransactionId ? merged : t)));
+        recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_UPDATED, savedDoc.id, {
+          amount: numericAmount,
+          categoryName: getTransactionCategoryLabel(merged),
+          type,
+          description,
+        });
+        closeTransactionDrawer();
+        return;
+      }
+
       const createdByName = currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
       setTransactions([savedDoc, ...transactions]);
-      setDescription(''); 
-      setAmount(''); 
-      setCategory(''); 
-      setIsRecurring(false);
-      setIsInstallment(false);
-      setInstallmentTotal('2');
-      setInstallmentCurrent('1');
-      setPaymentMethod('avulsa');
-      setSelectedCardId('');
-      setShowTransactionDrawer(false);
+      recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_CREATED, savedDoc.id, {
+        amount: numericAmount,
+        categoryName: getTransactionCategoryLabel(savedDoc),
+        type,
+      });
+      closeTransactionDrawer();
     } catch(err) { 
       console.error('Erro ao salvar transação:', err);
       alert('Erro ao salvar transação.'); 
@@ -581,13 +684,31 @@ function App() {
     return savedDoc;
   };
 
+  const handleImportBatchComplete = ({ count, importBatchId }) => {
+    recordActivityRef.current(ACTIVITY_TYPES.IMPORT_COMPLETED, importBatchId, { count });
+  };
+
+  const handleUndoImport = async ({ importedIds, importBatchId, count }) => {
+    if (!importedIds?.length) return;
+    if (activeProjectId && !canDeleteInProject) {
+      throw new Error('Você não tem permissão para desfazer importações neste projeto.');
+    }
+    await deleteTransactionsByIds(importedIds);
+    const idSet = new Set(importedIds);
+    setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
+    recordActivityRef.current(ACTIVITY_TYPES.IMPORT_UNDONE, importBatchId || 'import-batch', {
+      count: count || importedIds.length,
+    });
+  };
+
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
     try {
-      const proj = await createProject(newProjectName.trim());
+      const proj = await createProject(newProjectName.trim(), newProjectType);
       setProjects(prev => [...prev, proj]);
       setShowProjectModal(false);
       setNewProjectName('');
+      setNewProjectType('default');
       setActiveProjectId(proj.id);
     } catch (err) { alert('Erro ao criar projeto.'); }
   };
@@ -616,6 +737,7 @@ function App() {
     setTaskParcelasInput(parcelas > 0 ? String(parcelas) : '');
     setTaskParcelaValueInput(parcelaValue > 0 ? formatMoney(parcelaValue) : '');
     setTaskParcelasPaidInput(parcelasPagas > 0 ? String(parcelasPagas) : '');
+    setTaskCommentInput('');
     setShowTaskModal(true);
   };
 
@@ -628,6 +750,7 @@ function App() {
     setTaskParcelasInput('');
     setTaskParcelaValueInput('');
     setTaskParcelasPaidInput('');
+    setTaskCommentInput('');
   };
 
   const openPaymentModal = (task) => {
@@ -659,12 +782,41 @@ function App() {
       const newPaid = currentPaid + amount;
       await updateTask(taskToPay.id, { paidAmount: newPaid });
       setTasks(prev => prev.map(t => t.id === taskToPay.id ? { ...t, paidAmount: newPaid } : t));
+      recordActivityRef.current(ACTIVITY_TYPES.TASK_PAYMENT, taskToPay.id, {
+        amount,
+        title: taskToPay.title,
+      });
       closePaymentModal();
     } catch (err) {
       console.error('Erro ao registrar pagamento:', err);
       alert('Erro ao registrar pagamento.');
     } finally {
       setPaymentSaving(false);
+    }
+  };
+
+  const editingTask = useMemo(
+    () => (taskEditId ? tasks.find((t) => t.id === taskEditId) || null : null),
+    [tasks, taskEditId]
+  );
+
+  const handleAddTaskComment = async () => {
+    if (!taskEditId || !taskCommentInput.trim() || !canAddToProject) return;
+    setTaskCommentSaving(true);
+    try {
+      const comments = await appendTaskComment(
+        taskEditId,
+        editingTask?.comments,
+        taskCommentInput,
+        currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid
+      );
+      setTasks((prev) => prev.map((t) => (t.id === taskEditId ? { ...t, comments } : t)));
+      setTaskCommentInput('');
+    } catch (err) {
+      console.error('Erro ao adicionar comentário:', err);
+      alert('Erro ao adicionar comentário.');
+    } finally {
+      setTaskCommentSaving(false);
     }
   };
 
@@ -694,6 +846,7 @@ function App() {
         };
         await updateTask(taskEditId, payload);
         setTasks(prev => prev.map(t => t.id === taskEditId ? { ...t, ...payload } : t));
+        recordActivityRef.current(ACTIVITY_TYPES.TASK_UPDATED, taskEditId, { title: payload.title });
       } else {
         const payload = {
           title: taskTitleInput.trim(),
@@ -704,6 +857,7 @@ function App() {
           createdByName: currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid
         };
         const newTask = await addTask(activeProjectId, payload);
+        recordActivityRef.current(ACTIVITY_TYPES.TASK_CREATED, newTask.id, { title: payload.title });
         try {
           const updated = await getProjectTasks(activeProjectId);
           setTasks(updated);
@@ -724,13 +878,18 @@ function App() {
     try {
       await updateTask(task.id, { completed: !task.completed });
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: !t.completed } : t));
+      if (!task.completed) {
+        recordActivityRef.current(ACTIVITY_TYPES.TASK_COMPLETED, task.id, { title: task.title });
+      }
     } catch (err) { alert('Erro ao atualizar tarefa.'); }
   };
 
   const handleDeleteTask = async (taskId) => {
+    const task = tasks.find((t) => t.id === taskId);
     try {
       await deleteTask(taskId);
       setTasks(prev => prev.filter(t => t.id !== taskId));
+      recordActivityRef.current(ACTIVITY_TYPES.TASK_DELETED, taskId, { title: task?.title });
     } catch (err) { alert('Erro ao excluir tarefa.'); }
   };
 
@@ -742,24 +901,36 @@ function App() {
       setInvites(prev => prev.filter(i => i.id !== invite.id));
       setShowNotificationsPanel(false);
       setActiveProjectId(invite.projectId);
+      recordActivityRef.current(ACTIVITY_TYPES.INVITE_ACCEPTED, invite.projectId, {
+        projectName: invite.projectName,
+      }, invite.projectId);
+      recordActivityRef.current(ACTIVITY_TYPES.COLLABORATOR_JOINED, invite.projectId, {}, invite.projectId);
     } catch (err) {
       alert(err.message || 'Erro ao aceitar convite.');
     }
   };
 
   const handleRejectInvite = async (inviteId) => {
+    const invite = invites.find((i) => i.id === inviteId);
     try {
       await rejectInvite(inviteId);
       setInvites(prev => prev.filter(i => i.id !== inviteId));
+      recordActivityRef.current(ACTIVITY_TYPES.INVITE_REJECTED, invite?.projectId || inviteId, {
+        projectName: invite?.projectName,
+      }, invite?.projectId || null);
     } catch (err) {
       alert(err.message || 'Erro ao rejeitar.');
     }
   };
 
   const handleDelete = async (id) => {
+     const tx = transactions.find((t) => t.id === id);
      try {
        await deleteTransaction(id);
        setTransactions(transactions.filter(t => t.id !== id));
+       recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_DELETED, id, {
+         description: tx?.description,
+       });
      } catch (err) { 
        console.error(err);
        alert('Erro ao deletar');
@@ -775,10 +946,60 @@ function App() {
     currentUserId: currentUser?.uid,
   });
 
+  const recordActivityRef = useRef(() => {});
+
   const activeProject = useMemo(
     () => (activeProjectId ? projects.find((p) => p.id === activeProjectId) || null : null),
     [projects, activeProjectId]
   );
+
+  recordActivityRef.current = (type, entityId, metadata = {}, overrideProjectId = undefined) => {
+    if (!currentUser) return;
+    const projectId = overrideProjectId !== undefined ? overrideProjectId : (activeProjectId || null);
+    const project = projectId ? projects.find((p) => p.id === projectId) : activeProject;
+    const ownerId = project?.userId ?? currentUser.uid;
+    logActivity({
+      userId: ownerId,
+      projectId,
+      actorUid: currentUser.uid,
+      actorName: currentUser.username || currentUser.displayName || currentUser.email || currentUser.uid,
+      type,
+      entityId,
+      metadata,
+    }).catch(console.error);
+  };
+
+  const openTransactionDrawerForDate = (dateOrTx) => {
+    if (dateOrTx?.id) {
+      openTransactionForEdit(dateOrTx);
+      return;
+    }
+    resetTransactionForm();
+    if (dateOrTx instanceof Date) {
+      setTransactionDate(toTransactionDateInput(dateOrTx.toISOString()));
+      setSelectedMonth(dateOrTx.getMonth() + 1);
+      setSelectedYear(dateOrTx.getFullYear());
+    } else if (dateOrTx && typeof dateOrTx === 'object') {
+      const raw = dateOrTx.date || dateOrTx.createdAt;
+      if (raw) {
+        const d = new Date(raw);
+        if (!Number.isNaN(d.getTime())) {
+          setTransactionDate(toTransactionDateInput(d.toISOString()));
+          setSelectedMonth(d.getMonth() + 1);
+          setSelectedYear(d.getFullYear());
+        }
+      }
+    }
+    setShowTransactionDrawer(true);
+  };
+
+  const openCardDetails = () => {
+    setCurrentView('budgets');
+    setBudgetsSubTab('cards');
+  };
+
+  const canEditSubscriptions = !activeProjectId || canDeleteInProject;
+  const isFamilyProject = activeProject?.projectType === 'family';
 
   const categoryOwnerId = useMemo(
     () => activeProject?.userId ?? currentUser?.uid ?? null,
@@ -877,6 +1098,10 @@ function App() {
        await saveUserBudgets(newBudgets, activeProjectId, budgetOwnerId);
        setBudgets(newBudgets);
        setBudgetModalOpen(false);
+       recordActivityRef.current(ACTIVITY_TYPES.BUDGET_UPDATED, categoryId, {
+         categoryName: activeBudgetCat,
+         amount: finalVal,
+       });
     } catch(err) { alert('Erro ao salvar orçamento.')}
   };
 
@@ -1030,6 +1255,7 @@ function App() {
         dueDay: dueDayNum
       }, activeProjectId);
       setCreditCards([...creditCards, savedCard]);
+      recordActivityRef.current(ACTIVITY_TYPES.CARD_CREATED, savedCard.id, { name });
       setNewCardName('');
       setNewCardLimit('');
       setNewCardClosingDay(5);
@@ -1044,6 +1270,7 @@ function App() {
 
   const handleDeleteCreditCard = async (cardId) => {
     if (!currentUser) return;
+    const card = creditCards.find((c) => c.id === cardId);
     if (!window.confirm('Tem certeza de que deseja remover este cartão? As despesas associadas a ele continuarão existindo, mas perderão a associação com o cartão.')) {
       return;
     }
@@ -1051,6 +1278,7 @@ function App() {
       await deleteCreditCard(cardId);
       setCreditCards(creditCards.filter(c => c.id !== cardId));
       if (selectedCardId === cardId) setSelectedCardId('');
+      recordActivityRef.current(ACTIVITY_TYPES.CARD_DELETED, cardId, { name: card?.name });
     } catch (err) {
       console.error('Erro ao deletar cartão:', err);
       alert('Erro ao excluir cartão de crédito.');
@@ -1181,6 +1409,7 @@ function App() {
         projects={projects}
         activeProjectId={activeProjectId}
         activeProjectName={activeProject?.name}
+        isFamilyProject={isFamilyProject}
         currentView={currentView}
         canAddToProject={canAddToProject}
         showProjectDropdown={showProjectDropdown}
@@ -1190,7 +1419,11 @@ function App() {
           setShowProjectDropdown(false);
         }}
         onOpenProjectSettings={(projectId) => {
+          const proj = projects.find((p) => p.id === projectId);
           setProjectSettingsId(projectId);
+          setRenameProjectValue(proj?.name || '');
+          setProjectTypeInput(proj?.projectType || 'default');
+          setFamilyConfigInput({ ...DEFAULT_FAMILY_CONFIG, ...(proj?.familyConfig || {}) });
           setCurrentView('projectSettings');
           setShowProjectDropdown(false);
         }}
@@ -1204,7 +1437,7 @@ function App() {
           else setShowProfilePopover((prev) => !prev);
         }}
         onNavigate={setCurrentView}
-        onOpenTransactionDrawer={() => setShowTransactionDrawer(true)}
+        onOpenTransactionDrawer={() => { resetTransactionForm(); setShowTransactionDrawer(true); }}
         onLogout={handleLogout}
         onToggleTheme={toggleTheme}
         invites={invites}
@@ -1230,10 +1463,29 @@ function App() {
             project={projects.find((p) => p.id === projectSettingsId)}
             currentUser={currentUser}
             renameProjectValue={renameProjectValue}
+            projectTypeValue={projectTypeInput}
+            familyConfigValue={familyConfigInput}
             inviteEmailInput={inviteEmailInput}
             inviteRoleInput={inviteRoleInput}
             inviteSending={inviteSending}
+            canManageProject={canManageProject}
             onRenameValueChange={setRenameProjectValue}
+            onProjectTypeChange={setProjectTypeInput}
+            onFamilyConfigChange={(patch) => setFamilyConfigInput((prev) => ({ ...prev, ...patch }))}
+            onSaveProjectType={() => {
+              const proj = projects.find((p) => p.id === projectSettingsId);
+              if (!proj || !canManageProject) return;
+              const payload = { projectType: projectTypeInput };
+              if (projectTypeInput === 'family') {
+                payload.familyConfig = { ...DEFAULT_FAMILY_CONFIG, ...familyConfigInput };
+              }
+              updateProject(proj.id, payload)
+                .then(() => {
+                  setProjects((prev) => prev.map((p) => (p.id === proj.id ? { ...p, ...payload } : p)));
+                  alert('Tipo do projeto atualizado.');
+                })
+                .catch(() => alert('Erro ao salvar tipo do projeto.'));
+            }}
             onSaveName={() => {
               const proj = projects.find((p) => p.id === projectSettingsId);
               if (!proj || !renameProjectValue.trim()) return;
@@ -1282,10 +1534,15 @@ function App() {
             onSendInvite={() => {
               const proj = projects.find((p) => p.id === projectSettingsId);
               if (!proj || !inviteEmailInput.trim()) return;
+              const email = inviteEmailInput.trim();
               setInviteSending(true);
-              createInvite(proj.id, proj.name, inviteEmailInput.trim(), inviteRoleInput)
+              createInvite(proj.id, proj.name, email, inviteRoleInput)
                 .then(() => {
                   setInviteEmailInput('');
+                  recordActivityRef.current(ACTIVITY_TYPES.INVITE_SENT, proj.id, {
+                    toEmail: email,
+                    projectName: proj.name,
+                  }, proj.id);
                   alert('Convite enviado.');
                 })
                 .catch((err) => alert(err.message || 'Erro ao enviar convite.'))
@@ -1320,10 +1577,41 @@ function App() {
             creditCards={creditCards}
             canAddToProject={canAddToProject}
             canDeleteInProject={canDeleteInProject}
-            onAddClick={() => setShowTransactionDrawer(true)}
+            onAddClick={() => { resetTransactionForm(); setShowTransactionDrawer(true); }}
+            onEdit={openTransactionForEdit}
             onDelete={handleDelete}
             selectedMonth={selectedMonth}
             selectedYear={selectedYear}
+            isFamilyProject={isFamilyProject}
+            onOpenFamily={() => setCurrentView('family')}
+          />
+        )}
+
+        {currentView === 'simulator' && (
+          <SavingsSimulatorView
+            transactions={transactions}
+            expenseCategories={expenseCategories}
+            totalIncome={totalIncome}
+            totalExpense={totalExpense}
+            currentUser={currentUser}
+            activeProjectId={activeProjectId}
+            formatMoney={formatMoney}
+          />
+        )}
+
+        {currentView === 'family' && (
+          <FamilyModeView
+            activeProject={activeProject}
+            currentUser={currentUser}
+            filteredTransactions={filteredTransactions}
+            transactions={transactions}
+            budgets={budgets}
+            expenseCategories={expenseCategories}
+            tasks={tasks}
+            formatMoney={formatMoney}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
+            onOpenTasks={() => setCurrentView('tarefas')}
           />
         )}
 
@@ -1369,6 +1657,8 @@ function App() {
               customCategories={customCategories}
               canAddToProject={canAddToProject}
               onImportTransactions={handleStatementImport}
+              onImportBatchComplete={handleImportBatchComplete}
+              onUndoImport={handleUndoImport}
               formatMoney={formatMoney}
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
@@ -1394,7 +1684,44 @@ function App() {
             onOpenPaymentModal={openPaymentModal}
             onDeleteTask={handleDeleteTask}
           />
-        )}      </MainShell>
+        )}
+
+        {currentView === 'calendar' && (
+          <FinancialCalendarView
+            transactions={filteredTransactions}
+            creditCards={creditCards}
+            tasks={tasks}
+            currentUser={currentUser}
+            activeProjectId={activeProjectId}
+            formatMoney={formatMoney}
+            canAddToProject={canAddToProject}
+            onOpenTransactionForDate={openTransactionDrawerForDate}
+            onOpenTaskModal={openTaskModal}
+            onOpenCardDetails={openCardDetails}
+            initialMonth={selectedMonth}
+            initialYear={selectedYear}
+          />
+        )}
+
+        {currentView === 'subscriptions' && (
+          <SubscriptionsView
+            transactions={filteredTransactions}
+            currentUser={currentUser}
+            activeProjectId={activeProjectId}
+            formatMoney={formatMoney}
+            canManageProject={canEditSubscriptions}
+            customCategories={customCategories}
+          />
+        )}
+
+        {currentView === 'activity' && (
+          <ActivityFeedView
+            currentUser={currentUser}
+            activeProjectId={activeProjectId}
+            activeProject={activeProject}
+          />
+        )}
+      </MainShell>
 
       <ChatAssistant {...chatAssistant} />
 
@@ -1409,8 +1736,11 @@ function App() {
 
       <TransactionDrawer
         open={showTransactionDrawer}
-        onClose={() => setShowTransactionDrawer(false)}
-        onSubmit={handleAddTransaction}
+        onClose={closeTransactionDrawer}
+        onSubmit={handleSaveTransaction}
+        isEdit={!!editingTransactionId}
+        transactionDate={transactionDate}
+        setTransactionDate={setTransactionDate}
         description={description}
         setDescription={setDescription}
         amount={amount}
@@ -1452,7 +1782,9 @@ function App() {
       <ProjectModal
         open={showProjectModal}
         projectName={newProjectName}
+        projectType={newProjectType}
         onProjectNameChange={setNewProjectName}
+        onProjectTypeChange={setNewProjectType}
         onClose={() => setShowProjectModal(false)}
         onConfirm={handleCreateProject}
       />
@@ -1473,6 +1805,13 @@ function App() {
         parcelas={taskParcelasInput}
         parcelasPaid={taskParcelasPaidInput}
         saving={taskSaving}
+        comments={editingTask?.comments || []}
+        commentInput={taskCommentInput}
+        commentSaving={taskCommentSaving}
+        canAddComments={canAddToProject}
+        currentUserId={currentUser?.uid}
+        onCommentInputChange={setTaskCommentInput}
+        onAddComment={handleAddTaskComment}
         onTitleChange={setTaskTitleInput}
         onTypeChange={setTaskTypeInput}
         onMetaValueChange={setTaskMetaValueInput}

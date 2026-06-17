@@ -1,4 +1,5 @@
 import { formatMoney, parseMoneyInput } from '../../utils/money';
+import { formatRelativeTime } from '../../utils/activityLog.js';
 
 export default function TaskModal({
   open,
@@ -10,6 +11,13 @@ export default function TaskModal({
   parcelas,
   parcelasPaid,
   saving,
+  comments = [],
+  commentInput = '',
+  commentSaving = false,
+  canAddComments = true,
+  currentUserId,
+  onCommentInputChange,
+  onAddComment,
   onTitleChange,
   onTypeChange,
   onMetaValueChange,
@@ -25,6 +33,16 @@ export default function TaskModal({
   const parcelasNum = parseInt(parcelas, 10) || 0;
   const parcelaMoney = parseMoneyInput(parcelaValue);
   const parcelasPaidNum = parseInt(parcelasPaid, 10) || 0;
+  const sortedComments = [...comments].sort(
+    (a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+  );
+
+  const handleCommentKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onAddComment?.();
+    }
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -114,6 +132,59 @@ export default function TaskModal({
             />
           </div>
         )}
+        <div className="task-comments-section">
+          <div className="task-comments-header">
+            <label>Comentários</label>
+            {sortedComments.length > 0 ? (
+              <span className="task-comments-count">{sortedComments.length}</span>
+            ) : null}
+          </div>
+          {!isEdit ? (
+            <p className="task-comments-hint">Salve a tarefa para adicionar comentários.</p>
+          ) : (
+            <>
+              {sortedComments.length > 0 ? (
+                <ul className="task-comments-list">
+                  {sortedComments.map((comment) => (
+                    <li key={comment.id} className="task-comment-item">
+                      <p className="task-comment-text">{comment.text}</p>
+                      <span className="task-comment-meta">
+                        {comment.authorName}
+                        {comment.authorUid === currentUserId ? ' (você)' : ''}
+                        {' • '}
+                        {formatRelativeTime(comment.createdAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="task-comments-hint">Nenhum comentário ainda.</p>
+              )}
+              {canAddComments ? (
+                <div className="task-comment-compose">
+                  <textarea
+                    value={commentInput}
+                    onChange={(e) => onCommentInputChange?.(e.target.value)}
+                    onKeyDown={handleCommentKeyDown}
+                    placeholder="Escreva um comentário…"
+                    rows={2}
+                    disabled={commentSaving}
+                  />
+                  <button
+                    type="button"
+                    className="submit-btn task-comment-submit"
+                    onClick={onAddComment}
+                    disabled={commentSaving || !commentInput.trim()}
+                  >
+                    {commentSaving ? '...' : 'Comentar'}
+                  </button>
+                </div>
+              ) : (
+                <p className="task-comments-hint">Você pode visualizar, mas não adicionar comentários neste projeto.</p>
+              )}
+            </>
+          )}
+        </div>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button type="button" className="submit-btn" onClick={onSave} disabled={saving || !title.trim()}>

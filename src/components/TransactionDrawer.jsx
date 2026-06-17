@@ -4,6 +4,9 @@ export default function TransactionDrawer({
   open,
   onClose,
   onSubmit,
+  isEdit = false,
+  transactionDate = '',
+  setTransactionDate,
   description,
   setDescription,
   amount,
@@ -83,12 +86,22 @@ export default function TransactionDrawer({
     <div className="transaction-drawer-overlay" onClick={onClose}>
       <aside className="transaction-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="transaction-drawer-header">
-          <h3>Novo lançamento</h3>
+          <h3>{isEdit ? 'Editar lançamento' : 'Novo lançamento'}</h3>
           <button type="button" className="chat-close-btn" onClick={onClose} aria-label="Fechar">×</button>
         </div>
 
         <div className="transaction-drawer-body">
           <form onSubmit={onSubmit} className="transaction-drawer-form">
+            <div className="form-group">
+              <label>Data</label>
+              <input
+                type="date"
+                value={transactionDate}
+                onChange={(e) => setTransactionDate(e.target.value)}
+                required
+              />
+            </div>
+
             <div className="form-group">
               <label>Descrição</label>
               <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Ex: Conta de Luz" required />
@@ -206,7 +219,9 @@ export default function TransactionDrawer({
               </>
             )}
 
-            <button type="submit" className="submit-btn transaction-drawer-submit">Registrar lançamento</button>
+            <button type="submit" className="submit-btn transaction-drawer-submit">
+              {isEdit ? 'Salvar alterações' : 'Registrar lançamento'}
+            </button>
           </form>
 
           {canEditCategories ? (

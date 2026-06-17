@@ -1,11 +1,19 @@
+import { PROJECT_TYPE_OPTIONS } from '../constants/projectTypes.js';
+
 export default function ProjectSettingsView({
   project,
   currentUser,
   renameProjectValue,
+  projectTypeValue,
+  familyConfigValue,
   inviteEmailInput,
   inviteRoleInput,
   inviteSending,
+  canManageProject = false,
   onRenameValueChange,
+  onProjectTypeChange,
+  onFamilyConfigChange,
+  onSaveProjectType,
   onSaveName,
   onSaveCollaboratorName,
   onUpdateCollaboratorRole,
@@ -50,6 +58,50 @@ export default function ProjectSettingsView({
             <input type="text" value={renameProjectValue || project.name} onChange={(e) => onRenameValueChange(e.target.value)} />
           </div>
           <button type="button" className="submit-btn" onClick={onSaveName}>Salvar nome</button>
+        </section>
+
+        <section className="settings-block">
+          <h3>Tipo do projeto</h3>
+          <p className="settings-hint">Apenas o dono pode alterar o tipo e configurações familiares.</p>
+          <div className="form-group">
+            <label>Tipo</label>
+            <select
+              value={projectTypeValue || project.projectType || 'default'}
+              onChange={(e) => onProjectTypeChange?.(e.target.value)}
+              disabled={!canManageProject}
+            >
+              {PROJECT_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          {(projectTypeValue || project.projectType) === 'family' ? (
+            <div className="family-config-toggles">
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={familyConfigValue?.showMemberContribution !== false}
+                  disabled={!canManageProject}
+                  onChange={(e) => onFamilyConfigChange?.({ showMemberContribution: e.target.checked })}
+                />
+                <span>Mostrar contribuição por membro</span>
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={familyConfigValue?.showSettlement !== false}
+                  disabled={!canManageProject}
+                  onChange={(e) => onFamilyConfigChange?.({ showSettlement: e.target.checked })}
+                />
+                <span>Mostrar acerto entre membros</span>
+              </label>
+            </div>
+          ) : null}
+          {canManageProject ? (
+            <button type="button" className="submit-btn" onClick={onSaveProjectType} style={{ marginTop: 12 }}>
+              Salvar tipo e configurações
+            </button>
+          ) : null}
         </section>
 
         <section className="settings-block">

@@ -10,24 +10,32 @@ import {
   getDocs,
   arrayUnion 
 } from 'firebase/firestore';
+import { DEFAULT_FAMILY_CONFIG } from '../constants/projectTypes.js';
 
 const COLLECTION_NAME = 'projects';
 
 // Roles: 'view' = só ver | 'add' = ver e incluir | 'manage' = ver, incluir e excluir
-export const createProject = async (name) => {
+export const createProject = async (name, projectType = 'default') => {
   try {
     const user = auth.currentUser;
     if (!user) throw new Error("No authenticated user");
 
-    const newDocRef = await addDoc(collection(db, COLLECTION_NAME), {
+    const payload = {
       name,
       userId: user.uid,
+      projectType: projectType || 'default',
       collaborators: [],
       collaboratorRoles: {},
-      createdAt: new Date().toISOString()
-    });
+      createdAt: new Date().toISOString(),
+    };
+
+    if (projectType === 'family') {
+      payload.familyConfig = { ...DEFAULT_FAMILY_CONFIG };
+    }
+
+    const newDocRef = await addDoc(collection(db, COLLECTION_NAME), payload);
     
-    return { id: newDocRef.id, name, userId: user.uid, collaborators: [], collaboratorRoles: {} };
+    return { id: newDocRef.id, ...payload };
   } catch (error) {
     console.error("Error creating project:", error);
     throw error;

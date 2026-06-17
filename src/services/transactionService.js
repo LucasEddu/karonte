@@ -108,3 +108,35 @@ export const deleteTransaction = async (id) => {
     throw error;
   }
 };
+
+export const updateTransaction = async (id, transactionData) => {
+  try {
+    const user = auth.currentUser;
+    if (!user) throw new Error('No authenticated user');
+
+    const payload = {
+      ...transactionData,
+      updatedAt: new Date().toISOString(),
+      updatedByUid: user.uid,
+    };
+
+    delete payload.id;
+    delete payload.createdAt;
+    delete payload.createdByUid;
+    delete payload.createdByName;
+    delete payload.userId;
+
+    await updateDoc(doc(db, COLLECTION_NAME, id), payload);
+    return { id, ...transactionData, ...payload };
+  } catch (error) {
+    console.error('Error updating transaction:', error);
+    throw error;
+  }
+};
+
+export const deleteTransactionsByIds = async (ids) => {
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  if (!unique.length) return { deleted: 0 };
+  await Promise.all(unique.map((id) => deleteDoc(doc(db, COLLECTION_NAME, id))));
+  return { deleted: unique.length };
+};

@@ -242,6 +242,65 @@ service cloud.firestore {
         && docId.matches('^' + request.auth.uid + '_.*');
     }
 
+    match /activityLogs/{logId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (
+          (resource.data.userId == request.auth.uid && resource.data.get('projectId', null) == null)
+          || (
+            resource.data.get('projectId', null) != null
+            && isProjectMember(resource.data.projectId)
+          )
+        );
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.actorUid == request.auth.uid
+        && (
+          (request.resource.data.userId == request.auth.uid && request.resource.data.get('projectId', null) == null)
+          || (
+            request.resource.data.get('projectId', null) != null
+            && isProjectMember(request.resource.data.projectId)
+          )
+        );
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /userSubscriptions/{uid} {
+      allow read, write: if isAuthenticated() && isActiveUser() && request.auth.uid == uid;
+
+      match /items/{itemId} {
+        allow read: if isAuthenticated() && isActiveUser()
+          && (
+            request.auth.uid == uid
+            || (
+              resource.data.get('projectId', null) != null
+              && isProjectMember(resource.data.projectId)
+            )
+          );
+        allow create, update: if isAuthenticated() && isActiveUser()
+          && request.auth.uid == uid
+          && (
+            request.resource.data.get('projectId', null) == null
+            || isProjectMember(request.resource.data.projectId)
+          );
+        allow delete: if isAuthenticated() && isActiveUser() && request.auth.uid == uid;
+      }
+    }
+
+    match /savingsScenarios/{scenarioId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (
+          resource.data.userId == request.auth.uid
+          || (
+            resource.data.get('projectId', null) != null
+            && isProjectMember(resource.data.projectId)
+          )
+        );
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && isActiveUser()
+        && resource.data.userId == request.auth.uid;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

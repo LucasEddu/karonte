@@ -28,14 +28,26 @@ export default function HubView({
   canAddToProject,
   canDeleteInProject,
   onAddClick,
+  onEdit,
   onDelete,
   selectedMonth,
   selectedYear,
+  isFamilyProject = false,
+  onOpenFamily,
 }) {
   const forecast = calculateForecast();
 
   return (
     <main className="hub-layout main-content">
+      {isFamilyProject && onOpenFamily ? (
+        <section className="hub-family-banner card" onClick={onOpenFamily} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onOpenFamily(); }}>
+          <div>
+            <h3>Modo Família ativo</h3>
+            <p>Veja o painel familiar com gastos por membro, orçamento e metas compartilhadas.</p>
+          </div>
+          <span className="hub-family-banner-cta">Abrir painel →</span>
+        </section>
+      ) : null}
       <section className="hub-kpi-strip">
         <article className="hub-kpi hub-kpi--balance card">
           <span className="hub-kpi-label">Saldo</span>
@@ -282,7 +294,14 @@ export default function HubView({
             </div>
           ) : (
             filteredTransactions.map(t => (
-              <div key={t.id} className="history-item">
+              <div
+                key={t.id}
+                className={`history-item ${canAddToProject ? 'history-item--clickable' : ''}`}
+                onClick={canAddToProject ? () => onEdit?.(t) : undefined}
+                onKeyDown={canAddToProject ? (e) => { if (e.key === 'Enter') onEdit?.(t); } : undefined}
+                role={canAddToProject ? 'button' : undefined}
+                tabIndex={canAddToProject ? 0 : undefined}
+              >
                 <div className={`t-icon-box ${t.type}`}>
                   <div className={t.type === 'expense' ? 'arrow-down' : 'arrow-up'} />
                 </div>
@@ -313,7 +332,16 @@ export default function HubView({
                 <div className={`t-amount ${t.type}`}>
                   <span>{t.type === 'expense' ? '− ' : '+ '}</span><span>R$ {formatMoney(t.amount)}</span>
                 </div>
-                {canDeleteInProject && <button type="button" className="delete-btn-subtle" onClick={() => onDelete(t.id)} title="Remover">×</button>}
+                {canDeleteInProject && (
+                  <button
+                    type="button"
+                    className="delete-btn-subtle"
+                    onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
+                    title="Remover"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             ))
           )}

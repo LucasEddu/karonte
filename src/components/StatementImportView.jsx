@@ -45,6 +45,8 @@ export default function StatementImportView({
   customCategories = { expense: [], income: [] },
   canAddToProject = true,
   onImportTransactions,
+  onImportBatchComplete,
+  onUndoImport,
   formatMoney,
   selectedMonth,
   selectedYear,
@@ -59,6 +61,7 @@ export default function StatementImportView({
   const [dragOver, setDragOver] = useState(false);
   const [summary, setSummary] = useState(null);
   const [globalError, setGlobalError] = useState('');
+  const [isUndoing, setIsUndoing] = useState(false);
 
   const addFiles = useCallback((fileList) => {
     const incoming = Array.from(fileList || []);
@@ -251,6 +254,7 @@ export default function StatementImportView({
     let imported = 0;
     let failed = 0;
     const errors = [];
+    const importedIds = [];
 
     for (const row of selectedRows) {
       const dateObj = row.date instanceof Date ? row.date : new Date(row.date);
@@ -262,7 +266,7 @@ export default function StatementImportView({
       }
 
       try {
-        await onImportTransactions({
+        const saved = await onImportTransactions({
           description: row.description.trim(),
           amount,
           type: row.type,
@@ -277,6 +281,7 @@ export default function StatementImportView({
           duplicateHash: row.duplicateHash || createTransactionHash(row),
           createdByName,
         });
+        if (saved?.id) importedIds.push(saved.id);
         imported += 1;
       } catch (e) {
         failed += 1;
@@ -293,7 +298,13 @@ export default function StatementImportView({
       duplicates: dupes,
       failed,
       errors,
+      importBatchId,
+      importedIds,
     });
+
+    if (imported > 0 && onImportBatchComplete) {
+      onImportBatchComplete({ count: imported, importBatchId, importedIds });
+    }
 
     setFileEntries([]);
     setParsedRows([]);
@@ -302,6 +313,27 @@ export default function StatementImportView({
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     setIsImporting(false);
+  };
+
+  const handleUndoLastImport = async () => {
+    if (!summary?.importedIds?.length || !onUndoImport || isUndoing) return;
+    if (!window.confirm(`Desfazer importação de ${summary.importedIds.length} transação(ões)? Esta ação não pode ser revertida.`)) {
+      return;
+    }
+    setIsUndoing(true);
+    setGlobalError('');
+    try {
+      await onUndoImport({
+        importBatchId: summary.importBatchId,
+        importedIds: summary.importedIds,
+        count: summary.imported,
+      });
+      setSummary(null);
+    } catch (err) {
+      setGlobalError(err.message || 'Erro ao desfazer importação.');
+    } finally {
+      setIsUndoing(false);
+    }
   };
 
   if (!canAddToProject) {
@@ -353,6 +385,18 @@ export default function StatementImportView({
               <summary>Ver erros</summary>
               <ul>{summary.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
             </details>
+          ) : null}
+          {summary.imported > 0 && summary.importedIds?.length > 0 && onUndoImport ? (
+            <div className="import-undo-row">
+              <button
+                type="button"
+                className="text-btn import-undo-btn"
+                onClick={handleUndoLastImport}
+                disabled={isUndoing}
+              >
+                {isUndoing ? 'Desfazendo…' : `↩ Desfazer importação (${summary.importedIds.length})`}
+              </button>
+            </div>
           ) : null}
         </div>
       ) : null}

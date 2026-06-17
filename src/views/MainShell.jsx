@@ -5,6 +5,11 @@ const PAGE_TITLES = {
   hub: 'Visão Geral',
   budgets: 'Orçamentos',
   tarefas: 'Tarefas',
+  calendar: 'Calendário',
+  subscriptions: 'Assinaturas',
+  activity: 'Atividades',
+  simulator: 'Simulador',
+  family: 'Família',
   import: 'Importar Extrato',
   userSettings: 'Configurações de Conta',
   projectSettings: 'Configurações do Projeto',
@@ -16,6 +21,7 @@ export default function MainShell({
   projects,
   activeProjectId,
   activeProjectName,
+  isFamilyProject = false,
   currentView,
   canAddToProject,
   children,
@@ -58,6 +64,18 @@ export default function MainShell({
       ) : null}
       <div className="profile-popover-item" onClick={() => { onNavigate('userSettings'); onToggleProfilePopover(false); }}>
         ⚙ Configurações
+      </div>
+      <div className="profile-popover-item" onClick={() => { onNavigate('activity'); onToggleProfilePopover(false); }}>
+        📋 Atividades
+      </div>
+      <div className="profile-popover-item" onClick={() => { onNavigate('calendar'); onToggleProfilePopover(false); }}>
+        📅 Calendário
+      </div>
+      <div className="profile-popover-item" onClick={() => { onNavigate('subscriptions'); onToggleProfilePopover(false); }}>
+        🔄 Assinaturas
+      </div>
+      <div className="profile-popover-item" onClick={() => { onNavigate('simulator'); onToggleProfilePopover(false); }}>
+        📉 Simulador
       </div>
       <div className="profile-popover-item" onClick={() => { onToggleTheme(); onToggleProfilePopover(false); }}>
         {theme === 'dark' ? '☀️ Modo Claro' : '🌙 Modo Escuro'}
@@ -158,6 +176,23 @@ export default function MainShell({
           <a href="#" className={`nav-item ${currentView === 'tarefas' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('tarefas'); }}>
             <span className="icon">☑</span> Tarefas
           </a>
+          <a href="#" className={`nav-item ${currentView === 'calendar' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('calendar'); }}>
+            <span className="icon">📅</span> Calendário
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'subscriptions' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('subscriptions'); }}>
+            <span className="icon">🔄</span> Assinaturas
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'activity' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('activity'); }}>
+            <span className="icon">📋</span> Atividades
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'simulator' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('simulator'); }}>
+            <span className="icon">📉</span> Simulador
+          </a>
+          {isFamilyProject ? (
+            <a href="#" className={`nav-item ${currentView === 'family' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('family'); }}>
+              <span className="icon">👨‍👩‍👧‍👦</span> Família
+            </a>
+          ) : null}
           {canAddToProject ? (
             <a href="#" className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('import'); }}>
               <span className="icon">↓</span> Importar

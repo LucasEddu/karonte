@@ -79,6 +79,11 @@ export default function TasksView({
                   <div className="task-body">
                     <div className="task-row">
                       <span className="task-title">{task.title}</span>
+                      {(task.comments?.length || 0) > 0 ? (
+                        <span className="task-comment-badge" title={`${task.comments.length} comentário(s)`}>
+                          💬 {task.comments.length}
+                        </span>
+                      ) : null}
                       {parcelasCount > 0 && <span className="task-parcelas">{parcelasCount}x</span>}
                       <div className="task-actions">
                         {canAddToProject && isDespesa && meta > 0 && (

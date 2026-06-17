@@ -1,7 +1,11 @@
+import { PROJECT_TYPE_OPTIONS } from '../../constants/projectTypes.js';
+
 export default function ProjectModal({
   open,
   projectName,
+  projectType = 'default',
   onProjectNameChange,
+  onProjectTypeChange,
   onClose,
   onConfirm,
 }) {
@@ -15,7 +19,7 @@ export default function ProjectModal({
           <button type="button" className="close-btn" onClick={onClose}>✕</button>
         </div>
         <p className="modal-subtitle">
-          Crie projetos para gerenciar orçamentos separados (ex: &quot;Construção da Casa&quot;, &quot;Casamento 2025&quot;).
+          Crie projetos para gerenciar orçamentos separados (ex: &quot;Construção da Casa&quot;, &quot;Família Silva&quot;).
         </p>
         <div className="form-group">
           <label>Nome do Projeto</label>
@@ -26,6 +30,14 @@ export default function ProjectModal({
             placeholder="Digite o nome..."
             autoFocus
           />
+        </div>
+        <div className="form-group">
+          <label>Tipo de projeto</label>
+          <select value={projectType} onChange={(e) => onProjectTypeChange?.(e.target.value)}>
+            {PROJECT_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
+          </select>
         </div>
         <div className="modal-actions">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancelar</button>

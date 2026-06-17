@@ -55,6 +55,7 @@ export const addTask = async (projectId, payload) => {
       metaValue,
       parcelas,
       paidAmount,
+      comments: [],
       createdAt: new Date().toISOString()
     });
     return {
@@ -69,6 +70,7 @@ export const addTask = async (projectId, payload) => {
       metaValue,
       parcelas,
       paidAmount,
+      comments: [],
       createdAt: new Date().toISOString()
     };
   } catch (error) {
@@ -85,6 +87,25 @@ export const updateTask = async (taskId, data) => {
     console.error('Error updating task:', error);
     throw error;
   }
+};
+
+export const appendTaskComment = async (taskId, existingComments, text, authorName = null) => {
+  const user = auth.currentUser;
+  if (!user) throw new Error('No authenticated user');
+  const trimmed = String(text || '').trim();
+  if (!trimmed) throw new Error('Comentário vazio');
+
+  const comment = {
+    id: crypto.randomUUID(),
+    text: trimmed,
+    authorUid: user.uid,
+    authorName: authorName || user.displayName || user.email || user.uid,
+    createdAt: new Date().toISOString(),
+  };
+
+  const comments = [...(existingComments || []), comment];
+  await updateTask(taskId, { comments });
+  return comments;
 };
 
 export const deleteTask = async (taskId) => {
