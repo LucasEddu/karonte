@@ -12,13 +12,13 @@ Removidos de `App.jsx` (2026-06-17):
 
 **Critério de aceite:** build e testes passam; convite/rename no projeto continuam na tela de configurações.
 
-## 3.2 Extrair chat assistente (médio risco)
+## 3.2 Extrair chat assistente (médio risco) — parcial ✅
 
-| Novo arquivo | Responsabilidade |
-|--------------|------------------|
-| `src/hooks/useChatAssistant.js` | Estado (`chatMessages`, `chatInput`, `pendingActions`, FAB drag) |
-| `src/utils/chatParser.js` | `processChatMessage`, keywords, inferência de categoria |
-| `src/components/ChatAssistant.jsx` | FAB + janela + formulário |
+| Novo arquivo | Status |
+|--------------|--------|
+| `src/utils/chatParser.js` | ✅ `processChatMessage` extraído |
+| `src/hooks/useChatAssistant.js` | pendente |
+| `src/components/ChatAssistant.jsx` | pendente |
 
 **Touchpoints no App:** passar `balance`, `categoryStats`, `customCategories`, `onConfirmTransaction`.
 
