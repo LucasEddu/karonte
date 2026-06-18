@@ -1,5 +1,7 @@
 import { formatMoney } from '../utils/money';
 
+const faviconLight = `${import.meta.env.BASE_URL}karonte-favicon-light.svg`;
+
 export default function ChatAssistant({
   chatOpen,
   setChatOpen,
@@ -42,7 +44,7 @@ export default function ChatAssistant({
           ref={fabButtonRef}
           style={{ left: `${fabPosition.x}px`, top: `${fabPosition.y}px` }}
         >
-          <img src="/karonte-favicon-light.svg" alt="Karonte" className="fab-icon-img" />
+          <img src={faviconLight} alt="" className="fab-icon-img" aria-hidden="true" />
           {unreadCount > 0 ? <span className="fab-badge">{unreadCount}</span> : null}
         </button>
       )}
@@ -55,7 +57,7 @@ export default function ChatAssistant({
         <div className="chat-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div className="bot-avatar">
-              <img src="/karonte-favicon-light.svg" alt="K" />
+              <img src={faviconLight} alt="" aria-hidden="true" />
             </div>
             <div className="bot-info">
               <span className="bot-name">Karonte</span>
