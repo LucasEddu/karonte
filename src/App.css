@@ -3801,10 +3801,16 @@ h1, h2, h3, h4 { font-weight: 500; }
   overflow: auto;
   max-height: min(28rem, 52vh);
   margin-top: 0.75rem;
+  padding-bottom: 1px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
   background: var(--input-bg);
   -webkit-overflow-scrolling: touch;
+  isolation: isolate;
+}
+
+.import-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .import-table-wrap::-webkit-scrollbar {
@@ -3823,7 +3829,10 @@ h1, h2, h3, h4 { font-weight: 500; }
 
 .import-table {
   width: 100%;
-  border-collapse: collapse;
+  min-width: 920px;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 12px;
 }
 
@@ -3832,20 +3841,69 @@ h1, h2, h3, h4 { font-weight: 500; }
   padding: 8px 6px;
   border-bottom: 1px solid var(--border-light);
   text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
+  background: var(--input-bg);
 }
 
-.import-table th {
+.import-table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 3;
+  vertical-align: middle;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-tertiary);
   font-weight: 600;
-  background: var(--card-bg);
-  box-shadow: inset 0 -1px 0 var(--border-light);
+  background: var(--surface-elevated);
+  box-shadow: 0 1px 0 var(--border-light);
+}
+
+.import-table th:nth-child(1),
+.import-table td:nth-child(1) {
+  width: 40px;
+}
+
+.import-table th:nth-child(2),
+.import-table td:nth-child(2) {
+  width: 132px;
+}
+
+.import-table th:nth-child(3),
+.import-table td:nth-child(3) {
+  width: 28%;
+  min-width: 180px;
+}
+
+.import-table th:nth-child(4),
+.import-table td:nth-child(4) {
+  width: 96px;
+}
+
+.import-table th:nth-child(5),
+.import-table td:nth-child(5) {
+  width: 108px;
+}
+
+.import-table th:nth-child(6),
+.import-table td:nth-child(6) {
+  width: 128px;
+}
+
+.import-table th:nth-child(7),
+.import-table td:nth-child(7) {
+  width: 120px;
+}
+
+.import-desc-cell {
+  min-width: 0;
+}
+
+.import-desc-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .import-cell-input {
@@ -3868,8 +3926,8 @@ h1, h2, h3, h4 { font-weight: 500; }
   max-width: 100px;
 }
 
-.import-row--duplicate {
-  background: rgba(245, 158, 11, 0.06);
+.import-row--duplicate td {
+  background: color-mix(in srgb, var(--input-bg) 94%, var(--warning-color) 6%);
 }
 
 .import-dup-badge {

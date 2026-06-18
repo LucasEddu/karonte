@@ -522,17 +522,19 @@ export default function StatementImportView({
                         }}
                       />
                     </td>
-                    <td>
-                      <input
-                        type="text"
-                        className="import-cell-input import-cell-input--wide"
-                        value={row.description}
-                        onChange={(e) => updateRow(row.id, { description: e.target.value })}
-                      />
-                      {row.isDuplicate ? <span className="import-dup-badge">Duplicada</span> : null}
-                      {row.isPossibleDuplicate && !row.isDuplicate ? (
-                        <span className="import-dup-badge import-dup-badge--possible">Possível duplicada</span>
-                      ) : null}
+                    <td className="import-desc-cell">
+                      <div className="import-desc-content">
+                        <input
+                          type="text"
+                          className="import-cell-input import-cell-input--wide"
+                          value={row.description}
+                          onChange={(e) => updateRow(row.id, { description: e.target.value })}
+                        />
+                        {row.isDuplicate ? <span className="import-dup-badge">Duplicada</span> : null}
+                        {row.isPossibleDuplicate && !row.isDuplicate ? (
+                          <span className="import-dup-badge import-dup-badge--possible">Possível duplicada</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       <input
