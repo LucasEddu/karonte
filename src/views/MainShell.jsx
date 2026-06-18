@@ -9,6 +9,9 @@ const PAGE_TITLES = {
   subscriptions: 'Assinaturas',
   activity: 'Atividades',
   simulator: 'Simulador',
+  cashflow: 'Fluxo de Caixa',
+  comparison: 'Comparar',
+  leaks: 'Vazamentos',
   family: 'Família',
   import: 'Importações',
   userSettings: 'Configurações de Conta',
@@ -187,6 +190,15 @@ export default function MainShell({
           </a>
           <a href="#" className={`nav-item ${currentView === 'simulator' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('simulator'); }}>
             <span className="icon">📉</span> Simulador
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'cashflow' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('cashflow'); }}>
+            <span className="icon">📈</span> Fluxo de Caixa
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'comparison' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('comparison'); }}>
+            <span className="icon">⇄</span> Comparar
+          </a>
+          <a href="#" className={`nav-item ${currentView === 'leaks' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('leaks'); }}>
+            <span className="icon">💧</span> Vazamentos
           </a>
           {isFamilyProject ? (
             <a href="#" className={`nav-item ${currentView === 'family' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); onNavigate('family'); }}>

@@ -48,6 +48,12 @@ import SubscriptionsView from './views/SubscriptionsView';
 import ActivityFeedView from './views/ActivityFeedView';
 import SavingsSimulatorView from './views/SavingsSimulatorView';
 import FamilyModeView from './views/FamilyModeView';
+import CashFlowForecastView from './views/CashFlowForecastView';
+import PeriodComparisonView from './views/PeriodComparisonView';
+import FinancialLeaksView from './views/FinancialLeaksView';
+import { buildCashFlowForecast } from './utils/cashFlowForecast.js';
+import { comparePeriods, getPeriodPreset } from './utils/periodComparison.js';
+import { detectFinancialLeaks, buildLeakReport } from './utils/financialLeakDetector.js';
 import { logActivity, ACTIVITY_TYPES } from './utils/activityLog.js';
 import { DEFAULT_FAMILY_CONFIG } from './constants/projectTypes.js';
 
@@ -1155,6 +1161,39 @@ function App() {
 
   const getCardInvoiceStatsForCard = (card, transactionsList) =>
     getCardInvoiceStats(card, transactionsList, selectedMonth, selectedYear);
+
+  const hubAnalytics = useMemo(() => {
+    const cashFlow = buildCashFlowForecast({
+      transactions,
+      creditCards,
+      monthsAhead: 3,
+    });
+    const comparisonPreset = getPeriodPreset('month_vs_previous', new Date(selectedYear, selectedMonth - 1, 15));
+    const comparison = comparePeriods({
+      transactions,
+      periodA: comparisonPreset.periodA,
+      periodB: comparisonPreset.periodB,
+      budgets,
+      expenseCategories,
+      customCategories,
+      creditCards,
+      tasks,
+    });
+    const leaks = buildLeakReport(detectFinancialLeaks({
+      transactions,
+      month: selectedMonth,
+      year: selectedYear,
+      referenceDate: new Date(selectedYear, selectedMonth - 1, 15),
+    }));
+    return {
+      nextBalance: cashFlow.months[0]?.projectedBalance ?? 0,
+      nextMonthLabel: cashFlow.months[0]?.label ?? '',
+      incomeChangePct: comparison.summary.income.percent,
+      expenseChangePct: comparison.summary.expense.percent,
+      topLeak: leaks.biggestIncrease,
+    };
+  }, [transactions, creditCards, budgets, expenseCategories, customCategories, tasks, selectedMonth, selectedYear]);
+
   const handleTaskMoneyInput = (e, setter) => {
     let value = e.target.value.replace(/\D/g, '');
     if (value === '') { setter(''); return; }
@@ -1703,6 +1742,46 @@ function App() {
             selectedYear={selectedYear}
             isFamilyProject={isFamilyProject}
             onOpenFamily={() => setCurrentView('family')}
+            hubAnalytics={hubAnalytics}
+            onNavigateToView={setCurrentView}
+          />
+        )}
+
+        {currentView === 'cashflow' && (
+          <CashFlowForecastView
+            transactions={transactions}
+            creditCards={creditCards}
+            formatMoney={formatMoney}
+            chartTheme={chartTheme}
+            chartTooltipStyle={chartTooltipStyle}
+            activeProjectId={activeProjectId}
+          />
+        )}
+
+        {currentView === 'comparison' && (
+          <PeriodComparisonView
+            transactions={transactions}
+            budgets={budgets}
+            expenseCategories={expenseCategories}
+            customCategories={customCategories}
+            creditCards={creditCards}
+            tasks={tasks}
+            formatMoney={formatMoney}
+            chartTheme={chartTheme}
+            chartTooltipStyle={chartTooltipStyle}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
+            activeProjectId={activeProjectId}
+          />
+        )}
+
+        {currentView === 'leaks' && (
+          <FinancialLeaksView
+            transactions={transactions}
+            formatMoney={formatMoney}
+            selectedMonth={selectedMonth}
+            selectedYear={selectedYear}
+            activeProjectId={activeProjectId}
           />
         )}
 

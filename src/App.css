@@ -4975,3 +4975,323 @@ h1, h2, h3, h4 { font-weight: 500; }
   }
 }
 
+/* Sprint 1 — Analytics views */
+.analytics-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.analytics-summary-card {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.analytics-summary-card span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.analytics-summary-card strong {
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.analytics-summary-card strong.positive {
+  color: var(--success-color);
+}
+
+.analytics-summary-card strong.negative {
+  color: var(--danger-color);
+}
+
+.analytics-toolbar {
+  padding: 0.85rem 1rem;
+}
+
+.analytics-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.analytics-scope-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.analytics-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 0.75rem;
+}
+
+.analytics-chart-card {
+  grid-column: span 1;
+}
+
+.analytics-chart-wrap {
+  min-height: 260px;
+}
+
+.analytics-side-card,
+.analytics-table-card {
+  padding: 1rem;
+}
+
+.analytics-stat-list,
+.analytics-alert-list,
+.analytics-insight-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.analytics-stat-list li,
+.analytics-insight-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 13px;
+}
+
+.analytics-stat-list li span {
+  color: var(--text-secondary);
+}
+
+.analytics-alert {
+  font-size: 13px;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(99, 102, 241, 0.08);
+  border-left: 3px solid var(--primary-color);
+}
+
+.analytics-alert--high,
+.analytics-alert--critical {
+  background: rgba(239, 68, 68, 0.08);
+  border-left-color: var(--danger-color);
+}
+
+.analytics-table-wrap {
+  overflow-x: auto;
+}
+
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.analytics-table th,
+.analytics-table td {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.analytics-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.analytics-table td.positive {
+  color: var(--success-color);
+}
+
+.analytics-table td.negative {
+  color: var(--danger-color);
+}
+
+.comparison-indicator {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.75rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.comparison-indicator-label {
+  color: var(--text-secondary);
+}
+
+.comparison-indicator-value.positive {
+  color: var(--success-color);
+  font-weight: 700;
+}
+
+.comparison-indicator-value.negative {
+  color: var(--danger-color);
+  font-weight: 700;
+}
+
+.comparison-indicator-detail {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.comparison-custom-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  font-size: 13px;
+}
+
+.comparison-custom-periods label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.comparison-custom-periods input {
+  width: 4.5rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+}
+
+.leaks-grid {
+  grid-template-columns: 1fr;
+}
+
+.leaks-severity-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.leak-badge {
+  font-size: 11px;
+  padding: 0.25rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.leak-badge--critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger-color);
+}
+
+.leak-badge--high {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning-color);
+}
+
+.leak-badge--moderate {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary-color);
+}
+
+.leak-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+}
+
+.leak-status--critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger-color);
+}
+
+.leak-status--high {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--warning-color);
+}
+
+.leak-status--moderate {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--primary-color);
+}
+
+.hub-sprint-widgets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.hub-sprint-widget {
+  padding: 0.9rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.hub-sprint-widget:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.hub-sprint-widget-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 0.35rem;
+}
+
+.hub-sprint-widget-value {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 0.25rem;
+}
+
+.hub-sprint-widget-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.hub-sprint-widget-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.hub-sprint-widget-row .positive {
+  color: var(--success-color);
+}
+
+.hub-sprint-widget-row .negative {
+  color: var(--danger-color);
+}
+
+@media (max-width: 900px) {
+  .analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-sprint-widgets {
+    grid-template-columns: 1fr;
+  }
+}
+

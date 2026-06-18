@@ -34,6 +34,8 @@ export default function HubView({
   selectedYear,
   isFamilyProject = false,
   onOpenFamily,
+  hubAnalytics,
+  onNavigateToView,
 }) {
   const forecast = calculateForecast();
 
@@ -68,6 +70,63 @@ export default function HubView({
           <span className="hub-kpi-meta">Média: R$ {formatMoney(forecast.monthlyAverage)}</span>
         </article>
       </section>
+
+      {hubAnalytics && onNavigateToView ? (
+        <section className="hub-sprint-widgets">
+          <article
+            className="hub-sprint-widget card"
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigateToView('cashflow')}
+            onKeyDown={(e) => { if (e.key === 'Enter') onNavigateToView('cashflow'); }}
+          >
+            <span className="hub-sprint-widget-label">Fluxo de Caixa</span>
+            <strong className="hub-sprint-widget-value" style={{ color: hubAnalytics.nextBalance >= 0 ? 'var(--success-color)' : 'var(--danger-color)' }}>
+              R$ {formatMoney(hubAnalytics.nextBalance)}
+            </strong>
+            <span className="hub-sprint-widget-meta">Próximo saldo previsto ({hubAnalytics.nextMonthLabel})</span>
+          </article>
+          <article
+            className="hub-sprint-widget card"
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigateToView('comparison')}
+            onKeyDown={(e) => { if (e.key === 'Enter') onNavigateToView('comparison'); }}
+          >
+            <span className="hub-sprint-widget-label">Comparação mensal</span>
+            <div className="hub-sprint-widget-row">
+              <span className={hubAnalytics.incomeChangePct >= 0 ? 'positive' : 'negative'}>
+                Receitas {hubAnalytics.incomeChangePct >= 0 ? '+' : ''}{hubAnalytics.incomeChangePct.toFixed(0)}%
+              </span>
+              <span className={hubAnalytics.expenseChangePct <= 0 ? 'positive' : 'negative'}>
+                Despesas {hubAnalytics.expenseChangePct >= 0 ? '+' : ''}{hubAnalytics.expenseChangePct.toFixed(0)}%
+              </span>
+            </div>
+            <span className="hub-sprint-widget-meta">vs mês anterior</span>
+          </article>
+          <article
+            className="hub-sprint-widget card"
+            role="button"
+            tabIndex={0}
+            onClick={() => onNavigateToView('leaks')}
+            onKeyDown={(e) => { if (e.key === 'Enter') onNavigateToView('leaks'); }}
+          >
+            <span className="hub-sprint-widget-label">Vazamentos</span>
+            <strong className="hub-sprint-widget-value">
+              {hubAnalytics.topLeak
+                ? (hubAnalytics.topLeak.type === 'category'
+                  ? hubAnalytics.topLeak.category
+                  : hubAnalytics.topLeak.merchant)
+                : '—'}
+            </strong>
+            <span className="hub-sprint-widget-meta">
+              {hubAnalytics.topLeak
+                ? `+${hubAnalytics.topLeak.increasePct.toFixed(0)}% acima da média`
+                : 'Nenhum alerta relevante'}
+            </span>
+          </article>
+        </section>
+      ) : null}
 
       <section className="hub-bento">
         <article className="hub-bento-cell hub-bento-chart-main card grid-card">
