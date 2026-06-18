@@ -5426,3 +5426,41 @@ h1, h2, h3, h4 { font-weight: 500; }
   }
 }
 
+.firestore-debug-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3000;
+  width: min(320px, calc(100vw - 24px));
+  max-height: 240px;
+  overflow: auto;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.firestore-debug-panel strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--text-primary);
+}
+
+.firestore-debug-panel ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+}
+
+.firestore-debug-alert {
+  margin-top: 0.35rem;
+  color: var(--warning-color);
+}
+
+.import-history-load-more {
+  align-self: flex-start;
+  margin-top: -0.35rem;
+}
+

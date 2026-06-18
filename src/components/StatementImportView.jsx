@@ -6,7 +6,10 @@ import {
   MAX_FILE_SIZE_BYTES,
   ACCEPTED_EXTENSIONS,
 } from '../services/statementImportService';
-import { markDuplicates, createTransactionHash, findDuplicateMatch } from '../utils/statementParser';
+import { markDuplicates, createTransactionHash, findDuplicateMatch } from '../utils/importDeduplication.js';
+import { createImportPeriod, createImportFingerprint, findMatchingFingerprintBatch } from '../utils/importFingerprint.js';
+import { filterTransactionsInMemory } from '../utils/dataCache.js';
+import { getImportBatchesForScope } from '../services/importBatchService.js';
 
 const STATUS_LABELS = {
   waiting: 'Aguardando',
@@ -73,7 +76,8 @@ export default function StatementImportView({
   incomeCategories = [],
   customCategories = { expense: [], income: [] },
   canAddToProject = true,
-  onImportTransactions,
+  onImportTransactionsBatch,
+  fetchTransactionsForImportWindow,
   onImportBatchComplete,
   onUndoImport,
   formatMoney,
@@ -206,8 +210,44 @@ export default function StatementImportView({
         }
       }
 
-      const withDupes = markDuplicates(flat, transactions);
+      const { periodStart, periodEnd } = createImportPeriod(flat);
+
+      let existingForDedup = transactions;
+      if (fetchTransactionsForImportWindow && periodStart && periodEnd) {
+        existingForDedup = await fetchTransactionsForImportWindow({
+          startDate: periodStart,
+          endDate: periodEnd,
+        });
+      } else {
+        existingForDedup = filterTransactionsInMemory(transactions, {
+          startDate: periodStart,
+          endDate: periodEnd,
+          projectId: activeProjectId || undefined,
+          userId: currentUser?.uid,
+        });
+      }
+
+      const withDupes = markDuplicates(flat, existingForDedup);
       setParsedRows(withDupes);
+
+      if (currentUser?.uid && flat.length > 0) {
+        const fingerprint = createImportFingerprint(withDupes);
+        try {
+          const previousBatches = await getImportBatchesForScope(
+            currentUser.uid,
+            activeProjectId || null,
+            { limitCount: 20 }
+          );
+          const match = findMatchingFingerprintBatch(previousBatches, fingerprint.fingerprint);
+          if (match) {
+            setGlobalError(
+              `Este arquivo parece uma reimportação de ${new Date(match.importedAt || match.createdAt).toLocaleString('pt-BR')}. Duplicatas já foram marcadas automaticamente.`
+            );
+          }
+        } catch {
+          // ignora falha de fingerprint — não bloqueia importação
+        }
+      }
 
       const successCount = results.filter((r) => r.status === 'done').length;
       const errorCount = results.filter((r) => r.status === 'error').length;
@@ -304,64 +344,62 @@ export default function StatementImportView({
     const createdByName =
       currentUser.username || currentUser.displayName || currentUser.email || currentUser.uid;
 
-    let imported = 0;
-    let failed = 0;
-    const errors = [];
-    const importedIds = [];
+    const validRows = [];
     const failedRows = [];
-    const total = selectedRows.length;
+    const errors = [];
 
-    for (let i = 0; i < selectedRows.length; i += 1) {
-      const row = selectedRows[i];
+    for (const row of selectedRows) {
       const dateObj = row.date instanceof Date ? row.date : new Date(row.date);
       const amount = parseFloat(String(row.amount).replace(',', '.'));
       if (!dateObj || Number.isNaN(dateObj.getTime()) || Number.isNaN(amount) || amount <= 0) {
-        failed += 1;
         failedRows.push({
           description: row.description,
           amount,
           reason: 'data ou valor inválido',
         });
         errors.push(`"${row.description}": data ou valor inválido`);
-      } else {
-        try {
-          const saved = await onImportTransactions({
-            description: row.description.trim(),
-            amount,
-            type: row.type,
-            category: row.category,
-            date: dateObj.toISOString(),
-            displayDate: dateObj.toLocaleDateString('pt-BR'),
-            paymentMethod: 'avulsa',
-            source: 'statement_import',
-            importBatchId,
-            importedAt,
-            rawDescription: row.rawDescription || row.description,
-            duplicateHash: row.duplicateHash || createTransactionHash(row),
-            createdByName,
-          });
-          if (saved?.id) importedIds.push(saved.id);
-          imported += 1;
-        } catch (e) {
-          failed += 1;
-          failedRows.push({
-            description: row.description,
-            amount,
-            reason: e.message || 'erro ao salvar',
-          });
-          errors.push(`"${row.description}": ${e.message || 'erro ao salvar'}`);
-        }
+        continue;
       }
 
-      const processed = i + 1;
-      if (processed === total || processed % 10 === 0) {
-        setImportProgress({
-          current: processed,
-          total,
-          detail: `${imported} importada(s), ${failed} falha(s)`,
-        });
-      }
+      validRows.push({
+        description: row.description.trim(),
+        amount,
+        type: row.type,
+        category: row.category,
+        date: dateObj.toISOString(),
+        displayDate: dateObj.toLocaleDateString('pt-BR'),
+        paymentMethod: 'avulsa',
+        source: 'statement_import',
+        importBatchId,
+        importedAt,
+        rawDescription: row.rawDescription || row.description,
+        duplicateHash: row.duplicateHash || createTransactionHash(row),
+        createdByName,
+      });
     }
+
+    setImportProgress({ current: 0, total: validRows.length, detail: 'Salvando em lote…' });
+
+    let imported = 0;
+    let failed = failedRows.length;
+    let importedIds = [];
+
+    if (validRows.length > 0 && onImportTransactionsBatch) {
+      const { created, failed: batchFailed } = await onImportTransactionsBatch(validRows);
+      imported = created.length;
+      failed += batchFailed.length;
+      importedIds = created.map((item) => item.id);
+      batchFailed.forEach((item) => {
+        failedRows.push(item);
+        errors.push(`"${item.description}": ${item.reason}`);
+      });
+    }
+
+    setImportProgress({
+      current: selectedRows.length,
+      total: selectedRows.length,
+      detail: `${imported} importada(s), ${failed} falha(s)`,
+    });
 
     const ignored = parsedRows.length - selectedRows.length;
     const dupes = duplicateCount;
@@ -384,6 +422,9 @@ export default function StatementImportView({
       importedIds,
     });
 
+    const fingerprint = createImportFingerprint(parsedRows);
+    const { periodStart, periodEnd } = createImportPeriod(parsedRows);
+
     if (onImportBatchComplete && importBatchId) {
       try {
         await onImportBatchComplete({
@@ -391,6 +432,9 @@ export default function StatementImportView({
           type: 'statement',
           fileNames: fileEntries.map((f) => f.name),
           importedAt,
+          importFingerprint: fingerprint.fingerprint,
+          periodStart,
+          periodEnd,
           counts: {
             detected: parsedRows.length,
             imported,

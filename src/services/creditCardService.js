@@ -1,13 +1,14 @@
 import { db, auth } from '../config/firebase';
-import { 
-  collection, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  query, 
-  where, 
-  getDocs 
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  getDocs,
 } from 'firebase/firestore';
+import { logFirestoreRead, logFirestoreQuery } from '../utils/firestoreDebug.js';
 
 const COLLECTION = 'creditCards';
 
@@ -18,13 +19,16 @@ const COLLECTION = 'creditCards';
  */
 export const getCreditCards = async (userId, projectId = null) => {
   try {
+    logFirestoreQuery('getCreditCards', { userId, projectId });
     const q = query(
       collection(db, COLLECTION),
       where("userId", "==", userId),
       where("projectId", "==", projectId || 'geral')
     );
     const snap = await getDocs(q);
-    return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const cards = snap.docs.map(item => ({ id: item.id, ...item.data() }));
+    logFirestoreRead('getCreditCards', cards.length);
+    return cards;
   } catch (err) {
     console.error('Error fetching credit cards:', err);
     return [];

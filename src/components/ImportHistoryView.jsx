@@ -40,6 +40,7 @@ export default function ImportHistoryView({
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scopeMode, setScopeMode] = useState('current');
+  const [batchLimit, setBatchLimit] = useState(20);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [importedTxs, setImportedTxs] = useState([]);
@@ -61,13 +62,17 @@ export default function ImportHistoryView({
       let backfillScope = activeProjectId ?? null;
 
       if (scopeMode === 'all') {
-        firestoreBatches = await getAllUserImportBatches(currentUser.uid);
+        firestoreBatches = await getAllUserImportBatches(currentUser.uid, { limitCount: batchLimit });
         backfillScope = undefined;
       } else {
-        firestoreBatches = await getImportBatchesForScope(currentUser.uid, activeProjectId ?? null);
+        firestoreBatches = await getImportBatchesForScope(currentUser.uid, activeProjectId ?? null, {
+          limitCount: batchLimit,
+        });
       }
 
-      const reconstructed = reconstructBatchesFromTransactions(transactions, backfillScope);
+      const reconstructed = firestoreBatches.length === 0
+        ? reconstructBatchesFromTransactions(transactions, backfillScope)
+        : [];
       const merged = mergeImportBatches(firestoreBatches, reconstructed);
 
       setBatches(merged);
@@ -103,7 +108,7 @@ export default function ImportHistoryView({
     } finally {
       setLoading(false);
     }
-  }, [currentUser?.uid, activeProjectId, scopeMode, transactions, scopeLabel]);
+  }, [currentUser?.uid, activeProjectId, scopeMode, batchLimit, transactions]);
 
   useEffect(() => {
     loadBatches();
@@ -201,6 +206,7 @@ export default function ImportHistoryView({
           ) : null}
         </div>
       ) : (
+        <>
         <div className="import-history-list card">
           <ul>
             {batches.map((batch) => (
@@ -231,6 +237,16 @@ export default function ImportHistoryView({
             ))}
           </ul>
         </div>
+        {batches.length >= batchLimit ? (
+          <button
+            type="button"
+            className="text-btn import-history-load-more"
+            onClick={() => setBatchLimit((prev) => prev + 20)}
+          >
+            Carregar mais
+          </button>
+        ) : null}
+        </>
       )}
 
       {selectedId ? (

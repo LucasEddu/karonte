@@ -43,6 +43,7 @@ export default function HubView({
   const [typeFilter, setTypeFilter] = useState('all');
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
+  const [listLimit, setListLimit] = useState(20);
 
   const parseFilterAmount = (value) => {
     if (!String(value).trim()) return null;
@@ -75,6 +76,11 @@ export default function HubView({
       return true;
     });
   }, [filteredTransactions, searchQuery, typeFilter, minAmount, maxAmount]);
+
+  const visibleTransactions = useMemo(
+    () => displayedTransactions.slice(0, listLimit),
+    [displayedTransactions, listLimit]
+  );
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -470,7 +476,7 @@ export default function HubView({
               <button type="button" className="text-btn hub-empty-action" onClick={clearFilters}>Limpar filtros</button>
             </div>
           ) : (
-            displayedTransactions.map(t => (
+            visibleTransactions.map(t => (
               <div
                 key={t.id}
                 className={`history-item ${canAddToProject ? 'history-item--clickable' : ''}`}
@@ -523,6 +529,15 @@ export default function HubView({
             ))
           )}
         </div>
+        {displayedTransactions.length > listLimit ? (
+          <button
+            type="button"
+            className="text-btn hub-empty-action"
+            onClick={() => setListLimit((prev) => prev + 20)}
+          >
+            Carregar mais ({displayedTransactions.length - listLimit} restantes)
+          </button>
+        ) : null}
       </section>
     </main>
   );

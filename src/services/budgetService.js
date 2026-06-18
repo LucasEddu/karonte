@@ -1,5 +1,6 @@
 import { db, auth } from '../config/firebase';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { logFirestoreRead, logFirestoreQuery } from '../utils/firestoreDebug.js';
 import {
   normalizeBudgets,
   needsBudgetMigration,
@@ -27,12 +28,15 @@ export const saveUserBudgets = async (budgetsData, projectId = null, ownerId = n
 export const getUserBudgets = async (userId, projectId = null) => {
   try {
     const docId = projectId ? `${userId}_${projectId}` : userId;
+    logFirestoreQuery('getUserBudgets', { userId, projectId });
     const docRef = doc(db, 'budgets', docId);
     const docSnap = await getDoc(docRef);
 
     if (!docSnap.exists()) {
       return { ...EMPTY_BUDGETS };
     }
+
+    logFirestoreRead('getUserBudgets', 1);
 
     const raw = docSnap.data();
     const normalized = normalizeBudgets(raw);

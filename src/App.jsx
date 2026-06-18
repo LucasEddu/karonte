@@ -8,7 +8,7 @@ const ImportHubView = lazy(() => import('./components/ImportHubView'));
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
-import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction, updateTransaction, deleteTransactionsByIds } from './services/transactionService';
+import { addTransaction, addTransactionsBatch, deleteTransaction, updateTransaction, deleteTransactionsByIds } from './services/transactionService';
 import { saveImportBatch, markImportBatchUndone } from './services/importBatchService';
 import { savePurchaseInvoice } from './services/purchaseInvoiceService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
@@ -56,6 +56,18 @@ import { comparePeriods, getPeriodPreset } from './utils/periodComparison.js';
 import { detectFinancialLeaks, buildLeakReport } from './utils/financialLeakDetector.js';
 import { logActivity, ACTIVITY_TYPES } from './utils/activityLog.js';
 import { DEFAULT_FAMILY_CONFIG } from './constants/projectTypes.js';
+import {
+  getScopeKey,
+  getScopeCache,
+  addTransactionsToCache,
+  updateTransactionInCache,
+  removeTransactionsFromCache,
+} from './utils/dataCache.js';
+import { loadTransactionsForScope, loadTransactionsForImportWindow } from './utils/transactionLoader.js';
+
+const FirestoreUsageDebugPanel = import.meta.env.DEV
+  ? lazy(() => import('./components/dev/FirestoreUsageDebugPanel.jsx'))
+  : null;
 
 function App() {
   // --------- STATE: THEME ---------
@@ -366,13 +378,13 @@ function App() {
     return withIndex.map(x => x.t);
   }, [tasks, tasksTab, tasksSort]);
 
-  // Fetch user data when currentUser or activeProjectId or projects changes
+  // Fetch user data when currentUser or activeProjectId or projects changes.
+  // Não depende de `transactions` para evitar loops de reload.
   useEffect(() => {
     const fetchData = async () => {
        if (!currentUser) return;
        setDataLoading(true);
        try {
-         let txs;
          let budgetOwnerId = currentUser.uid;
          const activeProject = activeProjectId
            ? projects.find((p) => p.id === activeProjectId)
@@ -380,11 +392,11 @@ function App() {
          if (activeProject) budgetOwnerId = activeProject.userId;
          const categoryOwnerId = budgetOwnerId;
 
-         if (activeProjectId) {
-           txs = await getProjectTransactions(activeProjectId);
-         } else {
-           txs = await getUserTransactions(currentUser.uid, null);
-         }
+         const txs = await loadTransactionsForScope({
+           userId: currentUser.uid,
+           projectId: activeProjectId || null,
+           monthsBack: 18,
+         });
          setTransactions(txs);
 
          const userBudgets = await getUserBudgets(budgetOwnerId, activeProjectId);
@@ -407,9 +419,10 @@ function App() {
        }
     };
     fetchData();
-  }, [currentUser, activeProjectId, projects]);
+  }, [currentUser?.uid, currentUser?.role, activeProjectId, projects]);
 
-  // RECURRING TRANSACTIONS: persiste clones faltantes no Firestore
+  // RECURRING TRANSACTIONS: persiste clones faltantes no Firestore.
+  // Depende apenas de transactions.length, não do array inteiro.
   useEffect(() => {
     if (!currentUser || currentUser.role === 'admin' || dataLoading) return;
 
@@ -421,7 +434,9 @@ function App() {
           projectId: activeProjectId,
         });
         if (created.length > 0) {
-          setTransactions((prev) => [...prev, ...created]);
+          const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+          const cache = getScopeCache(scopeKey);
+          setTransactions(addTransactionsToCache(cache, created));
         }
       } catch (error) {
         console.error('Erro ao gerar recorrências:', error);
@@ -429,7 +444,7 @@ function App() {
     };
 
     runRecurrences();
-  }, [currentUser, dataLoading, activeProjectId, transactions.length]);
+  }, [currentUser?.uid, currentUser?.role, dataLoading, activeProjectId, transactions.length]);
 
 
   // --------- AUTH LOGIC ---------
@@ -650,7 +665,8 @@ function App() {
         };
         const savedDoc = await updateTransaction(editingTransactionId, updatedPayload);
         const merged = { ...existing, ...savedDoc };
-        setTransactions((prev) => prev.map((t) => (t.id === editingTransactionId ? merged : t)));
+        const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+        setTransactions(updateTransactionInCache(getScopeCache(scopeKey), merged));
         recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_UPDATED, savedDoc.id, {
           amount: numericAmount,
           categoryName: getTransactionCategoryLabel(merged),
@@ -663,7 +679,8 @@ function App() {
 
       const createdByName = currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
       const savedDoc = await addTransaction({ ...newTransaction, createdByName }, activeProjectId);
-      setTransactions([savedDoc, ...transactions]);
+      const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+      setTransactions(addTransactionsToCache(getScopeCache(scopeKey), [savedDoc]));
       recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_CREATED, savedDoc.id, {
         amount: numericAmount,
         categoryName: getTransactionCategoryLabel(savedDoc),
@@ -676,21 +693,37 @@ function App() {
     }
   };
 
-  const handleStatementImport = async (transactionData) => {
+  const handleStatementImportBatch = async (rows) => {
     const createdByName =
       currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
-    const categoryFields = buildTransactionCategoryFields(
-      transactionData.category,
-      transactionData.type,
-      customCategories
-    );
-    const savedDoc = await addTransaction(
-      { ...transactionData, ...categoryFields, createdByName },
-      activeProjectId
-    );
-    setTransactions((prev) => [savedDoc, ...prev]);
-    return savedDoc;
+
+    const payloads = rows.map((row) => {
+      const categoryFields = buildTransactionCategoryFields(
+        row.category,
+        row.type,
+        customCategories
+      );
+      return { ...row, ...categoryFields, createdByName };
+    });
+
+    const { created, failed } = await addTransactionsBatch(payloads, activeProjectId);
+    if (created.length) {
+      const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+      setTransactions(addTransactionsToCache(getScopeCache(scopeKey), created));
+    }
+    return { created, failed };
   };
+
+  const fetchTransactionsForImportWindow = useCallback(async ({ startDate, endDate }) => {
+    if (!currentUser?.uid) return [];
+    return loadTransactionsForImportWindow({
+      userId: currentUser.uid,
+      projectId: activeProjectId || null,
+      startDate,
+      endDate,
+      inMemoryTransactions: transactions,
+    });
+  }, [currentUser?.uid, activeProjectId, transactions]);
 
   const handleImportBatchComplete = async (batchPayload) => {
     const createdByName =
@@ -708,6 +741,9 @@ function App() {
       failedRows: batchPayload.failedRows || [],
       skippedRows: batchPayload.skippedRows || [],
       createdByName,
+      importFingerprint: batchPayload.importFingerprint || null,
+      periodStart: batchPayload.periodStart || null,
+      periodEnd: batchPayload.periodEnd || null,
       metadata: batchPayload.metadata || {},
     });
 
@@ -773,7 +809,8 @@ function App() {
       activeProjectId
     );
 
-    setTransactions((prev) => [savedTx, ...prev]);
+    const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+    setTransactions(addTransactionsToCache(getScopeCache(scopeKey), [savedTx]));
 
     await saveImportBatch(importBatchId, {
       projectId: activeProjectId || null,
@@ -816,8 +853,8 @@ function App() {
       throw new Error('Você não tem permissão para desfazer importações neste projeto.');
     }
     await deleteTransactionsByIds(importedIds);
-    const idSet = new Set(importedIds);
-    setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
+    const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+    setTransactions(removeTransactionsFromCache(getScopeCache(scopeKey), importedIds));
     if (importBatchId) {
       await markImportBatchUndone(importBatchId);
     }
@@ -1052,7 +1089,8 @@ function App() {
      const tx = transactions.find((t) => t.id === id);
      try {
        await deleteTransaction(id);
-       setTransactions(transactions.filter(t => t.id !== id));
+       const scopeKey = getScopeKey(currentUser.uid, activeProjectId);
+       setTransactions(removeTransactionsFromCache(getScopeCache(scopeKey), [id]));
        recordActivityRef.current(ACTIVITY_TYPES.TRANSACTION_DELETED, id, {
          description: tx?.description,
        });
@@ -1855,7 +1893,8 @@ function App() {
               customCategories={customCategories}
               canAddToProject={canAddToProject}
               canDeleteInProject={canDeleteInProject}
-              onImportTransactions={handleStatementImport}
+              onImportTransactionsBatch={handleStatementImportBatch}
+              fetchTransactionsForImportWindow={fetchTransactionsForImportWindow}
               onImportBatchComplete={handleImportBatchComplete}
               onUndoImport={handleUndoImport}
               onSaveInvoice={handleSaveInvoice}
@@ -1924,6 +1963,12 @@ function App() {
       </MainShell>
 
       <ChatAssistant {...chatAssistant} />
+
+      {FirestoreUsageDebugPanel ? (
+        <Suspense fallback={null}>
+          <FirestoreUsageDebugPanel />
+        </Suspense>
+      ) : null}
 
       <BudgetModal
         open={budgetModalOpen}

@@ -9,6 +9,7 @@ import {
   computeRuleStats,
   computeForecast,
 } from '../utils/financeCalculations';
+import { filterTransactionsInMemory } from '../utils/dataCache.js';
 
 export function useFinanceDerived({
   transactions,
@@ -34,10 +35,15 @@ export function useFinanceDerived({
     [filteredTransactions, expenseCategories]
   );
 
-  const monthlyEvolutionData = useMemo(
-    () => computeMonthlyEvolution(transactions),
-    [transactions]
-  );
+  const monthlyEvolutionData = useMemo(() => {
+    const end = new Date(selectedYear, selectedMonth - 1, 1);
+    const start = new Date(selectedYear, selectedMonth - 6, 1);
+    const windowTxs = filterTransactionsInMemory(transactions, {
+      startDate: start,
+      endDate: end,
+    });
+    return computeMonthlyEvolution(windowTxs, end);
+  }, [transactions, selectedMonth, selectedYear]);
 
   const totalBudgetLimit = useMemo(() => computeTotalBudgetLimit(budgets), [budgets]);
 
@@ -51,7 +57,15 @@ export function useFinanceDerived({
     [filteredTransactions, balance, classifications]
   );
 
-  const calculateForecast = () => computeForecast(transactions);
+  const calculateForecast = () => {
+    const end = new Date(selectedYear, selectedMonth - 1, 1);
+    const start = new Date(selectedYear, selectedMonth - 3, 1);
+    const windowTxs = filterTransactionsInMemory(transactions, {
+      startDate: start,
+      endDate: end,
+    });
+    return computeForecast(windowTxs, end);
+  };
 
   return {
     filteredTransactions,

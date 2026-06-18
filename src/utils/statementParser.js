@@ -134,47 +134,7 @@ export const descriptionsAreSimilar = (a, b) => {
   return maxLen > 0 && prefixMatches / maxLen >= 0.75;
 };
 
-const sameAmount = (a, b) =>
-  Number(a || 0).toFixed(2) === Number(b || 0).toFixed(2);
-
-const sameDate = (a, b) => dateKey(a) === dateKey(b);
-
-export const findDuplicateMatch = (transaction, existingTransactions = [], seenInBatch = new Set()) => {
-  const hash = createTransactionHash(transaction);
-  if (existingTransactions.some((t) => createTransactionHash(t) === hash) || seenInBatch.has(hash)) {
-    return { isDuplicate: true, isPossibleDuplicate: false, duplicateHash: hash };
-  }
-
-  const fuzzy = existingTransactions.some(
-    (t) =>
-      sameDate(t.date, transaction.date) &&
-      sameAmount(t.amount, transaction.amount) &&
-      descriptionsAreSimilar(t.description, transaction.description)
-  );
-
-  return {
-    isDuplicate: false,
-    isPossibleDuplicate: fuzzy,
-    duplicateHash: hash,
-  };
-};
-
-export const markDuplicates = (parsedTransactions, existingTransactions = []) => {
-  const seenInBatch = new Set();
-
-  return parsedTransactions.map((tx) => {
-    const match = findDuplicateMatch(tx, existingTransactions, seenInBatch);
-    seenInBatch.add(match.duplicateHash);
-    const isDup = match.isDuplicate || match.isPossibleDuplicate;
-    return {
-      ...tx,
-      duplicateHash: match.duplicateHash,
-      isDuplicate: match.isDuplicate,
-      isPossibleDuplicate: match.isPossibleDuplicate,
-      selected: !isDup,
-    };
-  });
-};
+export { markDuplicates, findDuplicateMatch } from './importDeduplication.js';
 
 const extractMoneyMatches = (line) => {
   const matches = [];

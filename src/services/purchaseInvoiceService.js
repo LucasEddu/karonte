@@ -1,5 +1,6 @@
 import { db, auth } from '../config/firebase';
 import { collection, addDoc, getDocs, query, where, deleteDoc, doc } from 'firebase/firestore';
+import { logFirestoreRead, logFirestoreQuery } from '../utils/firestoreDebug.js';
 
 const COLLECTION = 'purchaseInvoices';
 

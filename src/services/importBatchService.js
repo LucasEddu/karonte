@@ -8,9 +8,13 @@ import {
   setDoc,
   updateDoc,
   where,
+  orderBy,
+  limit,
 } from 'firebase/firestore';
+import { logFirestoreRead, logFirestoreWrite, logFirestoreQuery } from '../utils/firestoreDebug.js';
 
 const COLLECTION = 'importBatches';
+const DEFAULT_LIMIT = 20;
 
 export const saveImportBatch = async (batchId, data) => {
   const user = auth.currentUser;
@@ -24,6 +28,9 @@ export const saveImportBatch = async (batchId, data) => {
     fileNames: data.fileNames || [],
     importedAt: data.importedAt || new Date().toISOString(),
     status: data.status || 'completed',
+    importFingerprint: data.importFingerprint || null,
+    periodStart: data.periodStart || null,
+    periodEnd: data.periodEnd || null,
     counts: {
       detected: data.counts?.detected ?? 0,
       imported: data.counts?.imported ?? 0,
@@ -42,39 +49,102 @@ export const saveImportBatch = async (batchId, data) => {
   };
 
   await setDoc(doc(db, COLLECTION, batchId), payload);
+  logFirestoreWrite('saveImportBatch', 1);
   return payload;
 };
 
 export const getImportBatch = async (batchId) => {
   if (!batchId) return null;
+  logFirestoreQuery('getImportBatch', { batchId });
   const snap = await getDoc(doc(db, COLLECTION, batchId));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  if (!snap.exists()) return null;
+  logFirestoreRead('getImportBatch', 1);
+  return { id: snap.id, ...snap.data() };
 };
 
-export const getImportBatchesForScope = async (userId, projectId = null, max = 50) => {
-  const q = projectId
-    ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
-    : query(collection(db, COLLECTION), where('userId', '==', userId));
+export const getImportBatchDetails = (batchId) => getImportBatch(batchId);
 
-  const snap = await getDocs(q);
-  let batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+export const getImportBatchTransactionIds = async (batchId) => {
+  const batch = await getImportBatch(batchId);
+  return batch?.importedTransactionIds || [];
+};
 
-  if (!projectId) {
-    batches = batches.filter((b) => !b.projectId || b.projectId === 'geral');
+const sortAndSliceBatches = (batches, max) =>
+  batches
+    .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
+    .slice(0, max);
+
+export const getImportBatchesForScope = async (userId, projectId = null, options = {}) => {
+  const limitCount = options.limitCount ?? DEFAULT_LIMIT;
+
+  logFirestoreQuery('getImportBatchesForScope', { userId, projectId, limitCount });
+
+  let q;
+  if (projectId) {
+    q = query(
+      collection(db, COLLECTION),
+      where('projectId', '==', projectId),
+      orderBy('importedAt', 'desc'),
+      limit(limitCount)
+    );
+  } else {
+    q = query(
+      collection(db, COLLECTION),
+      where('userId', '==', userId),
+      orderBy('importedAt', 'desc'),
+      limit(limitCount * 2)
+    );
   }
 
-  return batches
-    .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
-    .slice(0, max);
+  try {
+    const snap = await getDocs(q);
+    let batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getImportBatchesForScope', batches.length);
+
+    if (!projectId) {
+      batches = batches.filter((b) => !b.projectId || b.projectId === 'geral');
+    }
+
+    return sortAndSliceBatches(batches, limitCount);
+  } catch (error) {
+    const fallbackQ = projectId
+      ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
+      : query(collection(db, COLLECTION), where('userId', '==', userId));
+
+    const snap = await getDocs(fallbackQ);
+    let batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getImportBatchesForScope:fallback', batches.length);
+
+    if (!projectId) {
+      batches = batches.filter((b) => !b.projectId || b.projectId === 'geral');
+    }
+
+    return sortAndSliceBatches(batches, limitCount);
+  }
 };
 
-export const getAllUserImportBatches = async (userId, max = 50) => {
-  const q = query(collection(db, COLLECTION), where('userId', '==', userId));
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
-    .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
-    .slice(0, max);
+export const getAllUserImportBatches = async (userId, options = {}) => {
+  const limitCount = options.limitCount ?? DEFAULT_LIMIT;
+  logFirestoreQuery('getAllUserImportBatches', { userId, limitCount });
+
+  try {
+    const q = query(
+      collection(db, COLLECTION),
+      where('userId', '==', userId),
+      orderBy('importedAt', 'desc'),
+      limit(limitCount)
+    );
+    const snap = await getDocs(q);
+    const batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getAllUserImportBatches', batches.length);
+    return batches;
+  } catch (error) {
+    const q = query(collection(db, COLLECTION), where('userId', '==', userId));
+    const snap = await getDocs(q);
+    const batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getAllUserImportBatches:fallback', batches.length);
+    return sortAndSliceBatches(batches, limitCount);
+  }
 };
 
 export const markImportBatchUndone = async (batchId) => {
@@ -82,4 +152,5 @@ export const markImportBatchUndone = async (batchId) => {
     status: 'undone',
     undoneAt: new Date().toISOString(),
   });
+  logFirestoreWrite('markImportBatchUndone', 1);
 };

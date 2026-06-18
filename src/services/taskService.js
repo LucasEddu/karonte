@@ -6,20 +6,23 @@ import {
   doc,
   query,
   where,
-  getDocs
+  getDocs,
 } from 'firebase/firestore';
+import { logFirestoreRead, logFirestoreQuery } from '../utils/firestoreDebug.js';
 
 const COLLECTION_NAME = 'tasks';
 
 export const getProjectTasks = async (projectId) => {
   try {
     if (!projectId) return [];
+    logFirestoreQuery('getProjectTasks', { projectId });
     const q = query(
       collection(db, COLLECTION_NAME),
       where('projectId', '==', projectId)
     );
     const snapshot = await getDocs(q);
     const tasks = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getProjectTasks', tasks.length);
     tasks.sort((a, b) => (new Date(b.createdAt || 0)) - (new Date(a.createdAt || 0)));
     return tasks;
   } catch (error) {
