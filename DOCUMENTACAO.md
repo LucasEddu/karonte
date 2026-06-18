@@ -27,6 +27,8 @@
 17. [Variáveis de ambiente](#17-variáveis-de-ambiente)
 18. [Scripts npm](#18-scripts-npm)
 19. [Limitações e pendências conhecidas](#19-limitações-e-pendências-conhecidas)
+20. [Importações (extratos e notas fiscais)](#20-importações-extratos-e-notas-fiscais)
+21. [Refatoração em andamento (prioridades técnicas)](#21-refatoração-em-andamento-prioridades-técnicas)
 
 ---
 
@@ -41,6 +43,7 @@ O **Karonte** é um aplicativo web de finanças pessoais com suporte a **projeto
 | **Tarefas** | Lista de tarefas e despesas com meta, parcelas e abatimento de pagamentos |
 | **Dashboard (Hub)** | KPIs, gráficos (6 meses), previsão de gastos, alertas rápidos |
 | **Assistente** | Chat com NLP simples para consultas e registro de lançamentos; suporte a voz (Web Speech API) |
+| **Importações** | Extratos (PDF, CSV, XLS/XLSX, OFX), notas fiscais (XML/PDF) e histórico de lotes |
 | **Administração** | Painel admin para gestão de usuários (bloqueio, reset de senha, edição de username) |
 | **Mobile** | UI responsiva + PWA instalável; shell Android via Capacitor |
 
@@ -118,10 +121,12 @@ karonte/
 │   │   ├── LoadingView.jsx, AuthView.jsx, AdminApp.jsx
 │   │   ├── UserSettingsView.jsx, ProjectSettingsView.jsx
 │   │   ├── BudgetsView.jsx, TasksView.jsx
-│   │   └── (import lazy) StatementImportView em components/
+│   │   └── (import lazy) ImportHubView em components/
 │   │
 │   ├── components/
 │   │   ├── HubView.jsx, TransactionDrawer.jsx, ChatAssistant.jsx
+│   │   ├── ImportHubView.jsx, StatementImportView.jsx, InvoiceImportView.jsx
+│   │   ├── ImportHistoryView.jsx
 │   │   ├── ProjectSelectorDropdown.jsx, NotificationsDropdown.jsx
 │   │   ├── ErrorBoundary.jsx
 │   │   └── modals/          ← Budget, Project, Task, Payment, DeleteProject
@@ -129,8 +134,9 @@ karonte/
 │   ├── utils/
 │   │   ├── categoryModel.js, budgetModel.js, categoryDetection.js
 │   │   ├── chatParser.js, financeCalculations.js, money.js
-│   │   ├── taskCalculations.js, statementParser.js
-│   │   └── __tests__/       ← Vitest (21 testes)
+│   │   ├── taskCalculations.js, statementParser.js, structuredStatementParser.js
+│   │   ├── invoiceParser.js
+│   │   └── __tests__/       ← Vitest
 │   │
 │   └── services/            ← Camada de acesso ao Firestore
 │       ├── authService.js
@@ -142,7 +148,10 @@ karonte/
 │       ├── taskService.js
 │       ├── inviteService.js
 │       ├── notificationService.js
-│       └── insightService.js
+│       ├── insightService.js
+│       ├── statementImportService.js
+│       ├── importBatchService.js
+│       └── purchaseInvoiceService.js
 │
 └── android/                 ← Projeto Capacitor Android
     └── app/src/main/...
@@ -243,7 +252,55 @@ karonte/
 | `paymentMethod` | string? | `'avulsa'` ou `'card'` |
 | `cardId` | string? | ID do cartão de crédito |
 | `parentId` | string? | ID da transação pai (recorrência) |
+| `source` | string? | `'statement_import'`, `'invoice_import'` ou legado `'statement_pdf'` |
+| `importBatchId` | string? | UUID do lote de importação |
+| `importedAt` | ISO string? | Timestamp da importação |
+| `invoiceId` | string? | ID em `purchaseInvoices` (nota fiscal) |
+| `rawDescription` | string? | Texto original do extrato |
+| `duplicateHash` | string? | Hash para detecção de duplicatas |
 | `createdAt` | ISO string | Criação |
+
+### `importBatches/{batchId}`
+
+Registro persistente de cada importação (extrato ou nota fiscal).
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | string | Mesmo UUID usado em `importBatchId` das transações |
+| `userId` | string | Autor |
+| `projectId` | string? | Projeto ou `null` (Geral) |
+| `type` | string | `'statement'` ou `'invoice'` |
+| `fileNames` | string[] | Arquivos processados |
+| `importedAt` | ISO string | Data da importação |
+| `status` | string | `'completed'`, `'partial'`, `'undone'` |
+| `counts` | object | `{ detected, imported, failed, ignored, duplicates }` |
+| `importedTransactionIds` | string[] | IDs salvos |
+| `importedInvoiceIds` | string[] | IDs de notas (quando aplicável) |
+| `skippedRows` | object[] | Linhas não importadas (motivo + descrição) |
+| `failedRows` | object[] | Falhas ao salvar |
+| `createdByUid` / `createdByName` | string | Quem importou |
+
+### `purchaseInvoices/{id}`
+
+Modelo Karonte de nota fiscal — **sem armazenar o arquivo original**.
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `userId` | string | Autor |
+| `projectId` | string? | Projeto |
+| `issuerName` | string | Emitente (loja/fornecedor) |
+| `issuerDocument` | string | CNPJ/CPF (somente dígitos) |
+| `accessKey` | string | Chave NF-e (44 dígitos) |
+| `invoiceNumber` | string | Número da NF |
+| `series` | string | Série |
+| `issueDate` | ISO string | Data de emissão |
+| `totalAmount` | number | Valor total |
+| `items` | object[] | `{ description, quantity, unitPrice, totalAmount }` |
+| `purchaseDescription` | string | Descrição escolhida pelo usuário |
+| `category` / `categoryId` / `categoryName` | | Categoria da despesa |
+| `importBatchId` | string? | Lote associado |
+| `sourceFormat` | string | `'nfe_xml'` ou `'pdf_text'` |
+| `createdAt` | ISO string | Registro no Karonte |
 
 ### `budgets/{docId}`
 
@@ -371,6 +428,8 @@ ID do documento: `buildInsightCacheId(uid, month, year, projectId)` → `{uid}_{
 | `notifications` | Destinatário (`userId`) | Criar: qualquer ativo. Update/delete: destinatário |
 | `userCategories` | Doc ID == `auth.uid` | Doc ID == `auth.uid` |
 | `creditCards` | Próprio OU cartão de projeto (não `'geral'`) | Mesmo critério |
+| `importBatches` | Próprio OU membro do projeto | Criar: membro com `canAddInProject`. Update: dono ou `canDeleteInProject` (desfazer) |
+| `purchaseInvoices` | Próprio OU membro do projeto | Criar/atualizar/excluir: dono OU membro com permissão equivalente a transações |
 | `/**` (demais) | **Negado** | **Negado** |
 
 ---
@@ -399,6 +458,35 @@ ID do documento: `buildInsightCacheId(uid, month, year, projectId)` → `{uid}_{
 | `getUserTransactions(userId, projectId?)` | Transações do usuário; `null` filtra Geral |
 | `getProjectTransactions(projectId)` | Todas as transações do projeto |
 | `deleteTransaction(id)` | Remove lançamento |
+| `deleteTransactionsByIds(ids)` | Remove vários (desfazer importação) |
+| `getTransactionsByImportBatchId(batchId)` | Transações de um lote |
+
+### `statementImportService.js`
+
+| Função | Descrição |
+|--------|-----------|
+| `validateStatementFile(file)` | Valida tipo e tamanho (5 MB) |
+| `processStatementFiles(files, opts)` | Processa PDF/CSV/XLS/OFX no navegador |
+| `parseStatementFile(file, opts)` | Roteia para parser adequado |
+
+Parsers: `statementParser.js` (PDF texto), `structuredStatementParser.js` (CSV/OFX/planilha).
+
+### `importBatchService.js`
+
+| Função | Descrição |
+|--------|-----------|
+| `saveImportBatch(batchId, data)` | Persiste lote de importação |
+| `getImportBatchesForScope(userId, projectId?)` | Histórico por escopo |
+| `getImportBatch(batchId)` | Detalhe de um lote |
+| `markImportBatchUndone(batchId)` | Marca lote como desfeito |
+
+### `purchaseInvoiceService.js`
+
+| Função | Descrição |
+|--------|-----------|
+| `savePurchaseInvoice(data, projectId?)` | Salva modelo Karonte da nota |
+| `getPurchaseInvoicesForScope(userId, projectId?)` | Lista notas do escopo |
+| `deletePurchaseInvoice(id)` | Remove nota |
 
 ### `budgetService.js`
 
@@ -505,7 +593,19 @@ Sidebar (desktop), header e bottom nav (mobile), top-bar com seletor de projeto,
 
 ### `ChatAssistant.jsx` + `useChatAssistant`
 
-FAB do assistente, histórico de mensagens, entrada de texto e voz. Lógica de parser em `src/utils/chatParser.js`; inferência de categoria compartilhada com import PDF em `src/utils/categoryDetection.js`.
+FAB do assistente, histórico de mensagens, entrada de texto e voz. Lógica de parser em `src/utils/chatParser.js`; inferência de categoria compartilhada com importações em `src/utils/categoryDetection.js`.
+
+### `ImportHubView.jsx` — Importações
+
+Hub com três abas (lazy-loaded via `App.jsx`, view `'import'`):
+
+| Aba | Componente | Função |
+|-----|------------|--------|
+| **Extrato** | `StatementImportView` | PDF, CSV, XLS/XLSX, OFX; revisão; duplicatas; barras de progresso |
+| **Nota fiscal** | `InvoiceImportView` | XML NF-e ou PDF (DANFE); extrai campos no browser; **não armazena arquivo** |
+| **Histórico** | `ImportHistoryView` | Lotes em `importBatches`; importadas vs ignoradas; desfazer |
+
+Processamento 100% client-side (`pdfjs-dist`, `xlsx`). Limite: **5 MB** por arquivo.
 
 ### Modais (`src/components/modals/`)
 
@@ -546,13 +646,14 @@ Captura erros React; tela de crash com reload. Export default via `AppWrapper` e
 |-------|--------|-----------|
 | `'hub'` | Visão Geral | Renderiza `<HubView />` |
 | `'budgets'` | Orçamentos | Limites por categoria + cartões (sub-abas: `categories` / `cards`) |
+| `'import'` | Importações | Extratos, notas fiscais e histórico (`ImportHubView`) |
 | `'tarefas'` | Tarefas | Lista de tarefas do projeto ativo (não disponível no Geral) |
 | `'userSettings'` | Configurações de Conta | Perfil (somente leitura) |
 | `'projectSettings'` | Configurações do Projeto | Renomear, participantes, convites, excluir (owner) |
 
 ### Navegação
 
-- **Sidebar / bottom nav mobile:** `hub`, `budgets`, `tarefas`
+- **Sidebar / bottom nav mobile:** `hub`, `budgets`, `tarefas`, `import` (se `canAddToProject`)
 - **Avatar / perfil:** `userSettings`
 - **Ícone ⚙ (owner):** `projectSettings`
 - **Seletor de projeto:** dropdown com Geral + projetos
@@ -1086,6 +1187,55 @@ Arquivo: `.env.local` (não versionado)
 | `insights` / LLM | Insights são template fixo, não IA real |
 | Capacitor dev server | `server.url` no config aponta IP local — inadequado para loja |
 | iOS | Projeto Capacitor iOS não criado |
+| PDF de extrato Nubank (saldos) | Formato diário não é ideal; preferir **CSV/OFX** do e-mail |
+| PDF de nota fiscal | Extração heurística; preferir **XML NF-e** para precisão |
+
+---
+
+## 20. Importações (extratos e notas fiscais)
+
+### Fluxo de extrato
+
+1. Usuário seleciona arquivos na aba **Extrato**
+2. `processStatementFiles` extrai transações (parser por formato)
+3. `markDuplicates` compara com lançamentos existentes
+4. Usuário revisa, edita e seleciona linhas
+5. Cada linha vira `addTransaction` com `source: 'statement_import'` e `importBatchId`
+6. `saveImportBatch` registra importadas, ignoradas e falhas
+7. Desfazer: `deleteTransactionsByIds` + `markImportBatchUndone`
+
+### Formatos de extrato
+
+| Formato | Parser | Observação |
+|---------|--------|------------|
+| PDF | `statementParser.js` + pdfjs | Texto selecionável; sem OCR |
+| CSV | `structuredStatementParser.js` | Nubank conta/fatura, delimitador `,` ou `;` |
+| XLS/XLSX | `structuredStatementParser.js` + xlsx | Primeira planilha |
+| OFX | `structuredStatementParser.js` | Blocos `STMTTRN` |
+
+### Fluxo de nota fiscal
+
+1. Upload **XML NF-e** (recomendado) ou **PDF DANFE**
+2. `invoiceParser.js` extrai emitente, valor, data, itens, chave
+3. Arquivo original é **descartado** após extração
+4. Usuário define descrição da compra e categoria
+5. Salva `purchaseInvoices` + despesa com `invoiceId` e `source: 'invoice_import'`
+
+### Histórico
+
+Coleção `importBatches` permite ver, por lote:
+
+- Quantas transações foram **importadas**
+- Quais ficaram **fora** (não selecionadas, duplicadas, erro)
+- **Desfazer** importação (requer `canDeleteInProject` em projetos compartilhados)
+
+### Deploy
+
+Após atualizar o app, publique as regras Firestore:
+
+```bash
+firebase deploy --only firestore:rules
+```
 
 ---
 
@@ -1113,6 +1263,10 @@ Arquivo: `.env.local` (não versionado)
 | `getCategoryBudgetInfo` | % orçamento por categoria |
 | `getCardInvoiceStats` | Fatura do cartão |
 | `exportToCSV` | Download relatório |
+| `handleStatementImport` | Salva transação importada de extrato |
+| `handleImportBatchComplete` | Persiste lote em `importBatches` |
+| `handleSaveInvoice` | Nota fiscal + despesa vinculada |
+| `handleUndoImport` | Desfaz lote de importação |
 | `processChatMessage` | NLP do assistente |
 | `handleChatSubmit` / `handleChatConfirm` / `handleChatCancel` | Fluxo do chat |
 | `handleVoiceToggle` | Entrada por voz |
@@ -1139,9 +1293,7 @@ Arquivo: `.env.local` (não versionado)
 
 ---
 
----
-
-## 20. Refatoração em andamento (prioridades técnicas)
+## 21. Refatoração em andamento (prioridades técnicas)
 
 ### Fase 1 — Concluída
 
@@ -1178,7 +1330,7 @@ Arquivo: `.env.local` (não versionado)
 | Modais | `src/components/modals/*` (3.5) |
 | Categorias compartilhadas | Leitura do dono; `canEditCategories` para edição |
 | Tarefas de projeto | `getProjectTasks(projectId)` — todos os membros |
-| Detecção de categoria | `categoryDetection.js` (chat + PDF) |
+| Detecção de categoria | `categoryDetection.js` (chat + importações) |
 | `App.jsx` | ~1.380 linhas (orquestração: auth, fetch, handlers, composição) |
 
 ### Pendente (Fase 3.6+)
@@ -1212,15 +1364,18 @@ src/
 │   ├── TasksView.jsx, UserSettingsView.jsx
 ├── components/
 │   ├── HubView.jsx, TransactionDrawer.jsx, ChatAssistant.jsx
+│   ├── ImportHubView.jsx, StatementImportView.jsx, InvoiceImportView.jsx
+│   ├── ImportHistoryView.jsx
 │   ├── ProjectSelectorDropdown.jsx, NotificationsDropdown.jsx
 │   ├── ErrorBoundary.jsx
 │   └── modals/ (Budget, Project, Task, Payment, DeleteProject)
 ├── utils/
 │   ├── categoryModel.js, budgetModel.js, categoryDetection.js
 │   ├── chatParser.js, financeCalculations.js, money.js
-│   ├── taskCalculations.js, statementParser.js
-│   └── __tests__/ (21 testes)
-├── services/ (auth, transactions, budgets, categories, …)
+│   ├── taskCalculations.js, statementParser.js, structuredStatementParser.js
+│   ├── invoiceParser.js
+│   └── __tests__/ (Vitest)
+├── services/ (auth, transactions, budgets, categories, statementImport, importBatch, purchaseInvoice, …)
 └── App.jsx (~1.380 linhas)
 ```
 

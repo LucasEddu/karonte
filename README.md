@@ -10,6 +10,7 @@ Consulte **[DOCUMENTACAO.md](./DOCUMENTACAO.md)** para a referência completa do
 
 - Estrutura organizacional e arquitetura
 - Todas as funcionalidades e telas
+- Importações (extratos CSV/PDF/OFX, notas fiscais, histórico)
 - Modelo de dados Firestore
 - Regras de segurança
 - Cálculos e fórmulas (orçamentos, previsão, 50-30-20, parcelas, cartões)
