@@ -25,12 +25,14 @@ export const savePurchaseInvoice = async (invoiceData, projectId = null) => {
 
 export const getPurchaseInvoicesForScope = async (userId, projectId = null, max = 100) => {
   try {
+    logFirestoreQuery('getPurchaseInvoicesForScope', { userId, projectId, max });
     const q = projectId
       ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
       : query(collection(db, COLLECTION), where('userId', '==', userId));
 
     const snap = await getDocs(q);
     let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    logFirestoreRead('getPurchaseInvoicesForScope', rows.length);
 
     if (!projectId) {
       rows = rows.filter((r) => !r.projectId || r.projectId === 'geral');
