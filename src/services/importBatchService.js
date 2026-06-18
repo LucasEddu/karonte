@@ -52,25 +52,29 @@ export const getImportBatch = async (batchId) => {
 };
 
 export const getImportBatchesForScope = async (userId, projectId = null, max = 50) => {
-  try {
-    const q = projectId
-      ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
-      : query(collection(db, COLLECTION), where('userId', '==', userId));
+  const q = projectId
+    ? query(collection(db, COLLECTION), where('projectId', '==', projectId))
+    : query(collection(db, COLLECTION), where('userId', '==', userId));
 
-    const snap = await getDocs(q);
-    let batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const snap = await getDocs(q);
+  let batches = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    if (!projectId) {
-      batches = batches.filter((b) => !b.projectId || b.projectId === 'geral');
-    }
-
-    return batches
-      .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
-      .slice(0, max);
-  } catch (error) {
-    console.error('Error fetching import batches:', error);
-    return [];
+  if (!projectId) {
+    batches = batches.filter((b) => !b.projectId || b.projectId === 'geral');
   }
+
+  return batches
+    .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
+    .slice(0, max);
+};
+
+export const getAllUserImportBatches = async (userId, max = 50) => {
+  const q = query(collection(db, COLLECTION), where('userId', '==', userId));
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => new Date(b.importedAt || b.createdAt) - new Date(a.importedAt || a.createdAt))
+    .slice(0, max);
 };
 
 export const markImportBatchUndone = async (batchId) => {

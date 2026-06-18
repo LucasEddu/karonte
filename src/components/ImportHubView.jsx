@@ -40,6 +40,8 @@ export default function ImportHubView(props) {
         <ImportHistoryView
           currentUser={props.currentUser}
           activeProjectId={props.activeProjectId}
+          activeProject={props.activeProject}
+          transactions={props.transactions}
           canDeleteInProject={props.canDeleteInProject}
           onUndoImport={props.onUndoImport}
           formatMoney={props.formatMoney}

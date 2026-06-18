@@ -385,23 +385,27 @@ export default function StatementImportView({
     });
 
     if (onImportBatchComplete && importBatchId) {
-      onImportBatchComplete({
-        importBatchId,
-        type: 'statement',
-        fileNames: fileEntries.map((f) => f.name),
-        importedAt,
-        counts: {
-          detected: parsedRows.length,
-          imported,
-          failed,
-          ignored,
-          duplicates: dupes,
-        },
-        importedTransactionIds: importedIds,
-        failedRows,
-        skippedRows,
-        createdByName,
-      });
+      try {
+        await onImportBatchComplete({
+          importBatchId,
+          type: 'statement',
+          fileNames: fileEntries.map((f) => f.name),
+          importedAt,
+          counts: {
+            detected: parsedRows.length,
+            imported,
+            failed,
+            ignored,
+            duplicates: dupes,
+          },
+          importedTransactionIds: importedIds,
+          failedRows,
+          skippedRows,
+          createdByName,
+        });
+      } catch (batchErr) {
+        errors.push(batchErr.message || 'Erro ao registrar histórico da importação.');
+      }
     }
 
     setFileEntries([]);

@@ -1,6 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { getImportBatchesForScope, getImportBatch } from '../services/importBatchService';
+import React, { useCallback, useEffect, useState } from 'react';
+import { getImportBatchesForScope, getAllUserImportBatches, getImportBatch } from '../services/importBatchService';
 import { getTransactionsByImportBatchId } from '../services/transactionService';
+import {
+  mergeImportBatches,
+  reconstructBatchesFromTransactions,
+  getScopeLabel,
+} from '../utils/importBatchBackfill.js';
 
 const TYPE_LABELS = {
   statement: 'Extrato',
@@ -26,35 +31,83 @@ function formatReason(reason) {
 export default function ImportHistoryView({
   currentUser,
   activeProjectId,
+  activeProject,
+  transactions = [],
   canDeleteInProject = true,
   onUndoImport,
   formatMoney,
 }) {
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scopeMode, setScopeMode] = useState('current');
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [importedTxs, setImportedTxs] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [error, setError] = useState('');
+  const [permissionHint, setPermissionHint] = useState('');
 
-  const loadBatches = async () => {
+  const scopeLabel = getScopeLabel(activeProjectId, activeProject?.name);
+
+  const loadBatches = useCallback(async () => {
     if (!currentUser?.uid) return;
     setLoading(true);
+    setError('');
+    setPermissionHint('');
+
     try {
-      const rows = await getImportBatchesForScope(currentUser.uid, activeProjectId);
-      setBatches(rows);
+      let firestoreBatches = [];
+      let backfillScope = activeProjectId ?? null;
+
+      if (scopeMode === 'all') {
+        firestoreBatches = await getAllUserImportBatches(currentUser.uid);
+        backfillScope = undefined;
+      } else {
+        firestoreBatches = await getImportBatchesForScope(currentUser.uid, activeProjectId ?? null);
+      }
+
+      const reconstructed = reconstructBatchesFromTransactions(transactions, backfillScope);
+      const merged = mergeImportBatches(firestoreBatches, reconstructed);
+
+      setBatches(merged);
+
+      if (merged.length === 0 && firestoreBatches.length === 0 && reconstructed.length > 0) {
+        setPermissionHint('Alguns lotes foram recuperados das transações importadas (registro original ausente).');
+      } else if (
+        merged.length === 0
+        && scopeMode === 'current'
+        && reconstructBatchesFromTransactions(transactions, undefined).length > 0
+      ) {
+        setPermissionHint(
+          `Nenhuma importação neste escopo (${scopeLabel}). Tente "Todas as minhas importações" — a importação pode ter sido feita em outro projeto ou no Geral.`
+        );
+      }
     } catch (e) {
-      setError(e.message || 'Erro ao carregar histórico.');
+      const msg = e.message || 'Erro ao carregar histórico.';
+      if (msg.includes('permission') || msg.includes('Permission')) {
+        setError(
+          'Sem permissão para ler o histórico. Publique as regras Firestore: firebase deploy --only firestore:rules'
+        );
+      } else {
+        setError(msg);
+      }
+      const reconstructed = reconstructBatchesFromTransactions(
+        transactions,
+        scopeMode === 'all' ? undefined : (activeProjectId ?? null)
+      );
+      if (reconstructed.length) {
+        setBatches(reconstructed);
+        setPermissionHint('Exibindo lotes recuperados das transações (Firestore indisponível ou sem permissão).');
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser?.uid, activeProjectId, scopeMode, transactions, scopeLabel]);
 
   useEffect(() => {
     loadBatches();
-  }, [currentUser?.uid, activeProjectId]);
+  }, [loadBatches]);
 
   const openDetail = async (batchId) => {
     setSelectedId(batchId);
@@ -62,8 +115,11 @@ export default function ImportHistoryView({
     setError('');
     try {
       const batch = await getImportBatch(batchId);
-      setDetail(batch);
-      const txs = await getTransactionsByImportBatchId(batchId);
+      const txsFromDb = await getTransactionsByImportBatchId(batchId);
+      const txsFromMemory = transactions.filter((t) => t.importBatchId === batchId);
+      const txs = txsFromDb.length ? txsFromDb : txsFromMemory;
+
+      setDetail(batch || batches.find((b) => b.id === batchId) || null);
       setImportedTxs(txs);
     } catch (e) {
       setError(e.message || 'Erro ao carregar detalhes.');
@@ -80,7 +136,9 @@ export default function ImportHistoryView({
 
   const handleUndo = async () => {
     if (!detail || !canDeleteInProject || undoing) return;
-    const ids = detail.importedTransactionIds || importedTxs.map((t) => t.id);
+    const ids = detail.importedTransactionIds?.length
+      ? detail.importedTransactionIds
+      : importedTxs.map((t) => t.id);
     if (!ids.length) return;
     if (!window.confirm(`Desfazer importação de ${ids.length} lançamento(s)?`)) return;
 
@@ -108,12 +166,40 @@ export default function ImportHistoryView({
         <p>Veja o que foi importado, o que ficou de fora e desfaça lotes anteriores.</p>
       </div>
 
+      <div className="import-history-toolbar card">
+        <span className="import-history-scope">Escopo: <strong>{scopeLabel}</strong></span>
+        <div className="import-history-scope-filter">
+          <button
+            type="button"
+            className={`calendar-filter-btn ${scopeMode === 'current' ? 'active' : ''}`}
+            onClick={() => setScopeMode('current')}
+          >
+            Escopo atual
+          </button>
+          <button
+            type="button"
+            className={`calendar-filter-btn ${scopeMode === 'all' ? 'active' : ''}`}
+            onClick={() => setScopeMode('all')}
+          >
+            Todas as minhas importações
+          </button>
+        </div>
+      </div>
+
       {error ? <div className="import-alert import-alert--error">{error}</div> : null}
+      {permissionHint && !error ? (
+        <div className="import-alert import-alert--info">{permissionHint}</div>
+      ) : null}
 
       {loading ? (
         <div className="card import-history-loading">Carregando histórico…</div>
       ) : batches.length === 0 ? (
-        <div className="card import-history-empty">Nenhuma importação registrada ainda.</div>
+        <div className="card import-history-empty">
+          Nenhuma importação registrada neste escopo.
+          {scopeMode === 'current' ? (
+            <p className="import-hint">Se você importou no <strong>Geral</strong> ou em outro projeto, use &quot;Todas as minhas importações&quot;.</p>
+          ) : null}
+        </div>
       ) : (
         <div className="import-history-list card">
           <ul>
@@ -122,6 +208,9 @@ export default function ImportHistoryView({
                 <button type="button" className="import-history-item-btn" onClick={() => openDetail(batch.id)}>
                   <div className="import-history-item-main">
                     <strong>{TYPE_LABELS[batch.type] || batch.type}</strong>
+                    {batch._reconstructed ? (
+                      <span className="import-history-reconstructed">Recuperado</span>
+                    ) : null}
                     <span className="import-history-date">
                       {new Date(batch.importedAt || batch.createdAt).toLocaleString('pt-BR')}
                     </span>
@@ -155,9 +244,13 @@ export default function ImportHistoryView({
             <p>Carregando…</p>
           ) : (
             <>
+              {detail._reconstructed ? (
+                <p className="import-hint">Lote recuperado a partir das transações importadas (detalhes de ignoradas podem estar incompletos).</p>
+              ) : null}
+
               <div className="import-history-stats">
-                <span><strong>{detail.counts?.detected ?? 0}</strong> detectadas</span>
-                <span><strong>{detail.counts?.imported ?? 0}</strong> importadas</span>
+                <span><strong>{detail.counts?.detected ?? importedTxs.length}</strong> detectadas</span>
+                <span><strong>{detail.counts?.imported ?? importedTxs.length}</strong> importadas</span>
                 <span><strong>{detail.counts?.ignored ?? 0}</strong> ignoradas</span>
                 <span><strong>{detail.counts?.failed ?? 0}</strong> falhas</span>
               </div>
@@ -197,13 +290,13 @@ export default function ImportHistoryView({
                       </li>
                     ))}
                     {!detail.skippedRows?.length && !detail.failedRows?.length ? (
-                      <li className="import-hint">Tudo foi importado.</li>
+                      <li className="import-hint">Tudo foi importado ou detalhes não disponíveis.</li>
                     ) : null}
                   </ul>
                 </section>
               </div>
 
-              {detail.status === 'completed' && canDeleteInProject && importedTxs.length > 0 ? (
+              {detail.status !== 'undone' && canDeleteInProject && importedTxs.length > 0 ? (
                 <div className="import-undo-row">
                   <button type="button" className="text-btn import-undo-btn" onClick={handleUndo} disabled={undoing}>
                     {undoing ? 'Desfazendo…' : `↩ Desfazer importação (${importedTxs.length})`}
