@@ -301,6 +301,72 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
+    match /importBatches/{batchId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (
+          resource.data.userId == request.auth.uid
+          || (
+            resource.data.get('projectId', null) != null
+            && isProjectMember(resource.data.projectId)
+          )
+        );
+
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdByUid == request.auth.uid
+        && (
+          request.resource.data.get('projectId', null) == null
+          || (
+            isProjectMember(request.resource.data.projectId)
+            && canAddInProject(request.resource.data.projectId)
+          )
+        );
+
+      allow update: if isAuthenticated() && isActiveUser()
+        && resource.data.userId == request.auth.uid
+        && (
+          resource.data.get('projectId', null) == null
+          || (
+            isProjectMember(resource.data.projectId)
+            && canDeleteInProject(resource.data.projectId)
+          )
+        );
+
+      allow delete: if false;
+    }
+
+    match /purchaseInvoices/{invoiceId} {
+      allow read: if isAuthenticated() && isActiveUser()
+        && (
+          resource.data.userId == request.auth.uid
+          || (
+            resource.data.get('projectId', null) != null
+            && isProjectMember(resource.data.projectId)
+          )
+        );
+
+      allow create: if isAuthenticated() && isActiveUser()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.createdByUid == request.auth.uid
+        && (
+          request.resource.data.get('projectId', null) == null
+          || (
+            isProjectMember(request.resource.data.projectId)
+            && canAddInProject(request.resource.data.projectId)
+          )
+        );
+
+      allow update, delete: if isAuthenticated() && isActiveUser()
+        && resource.data.userId == request.auth.uid
+        && (
+          resource.data.get('projectId', null) == null
+          || (
+            isProjectMember(resource.data.projectId)
+            && canDeleteInProject(resource.data.projectId)
+          )
+        );
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

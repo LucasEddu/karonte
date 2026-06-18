@@ -4448,6 +4448,230 @@ h1, h2, h3, h4 { font-weight: 500; }
   font-weight: 600;
 }
 
+/* Import hub tabs + history + invoice */
+.import-tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  margin-bottom: 0;
+}
+
+.import-tab {
+  flex: 1;
+  padding: 0.65rem 1rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.import-tab--active {
+  background: var(--primary-subtle);
+  color: var(--primary-color);
+}
+
+.invoice-import,
+.import-history {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.invoice-form-header h4 {
+  margin: 0 0 0.35rem;
+}
+
+.invoice-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.invoice-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.invoice-field--wide {
+  grid-column: 1 / -1;
+}
+
+.invoice-field input,
+.invoice-field select {
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  color: var(--text-primary);
+}
+
+.invoice-items {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-light);
+}
+
+.invoice-items h5 {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+}
+
+.invoice-items ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.invoice-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-light);
+}
+
+.import-history-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.import-history-item-btn {
+  width: 100%;
+  text-align: left;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--input-bg);
+  cursor: pointer;
+  color: inherit;
+}
+
+.import-history-item-btn:hover {
+  border-color: var(--primary-color);
+  background: var(--primary-subtle);
+}
+
+.import-history-item-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.import-history-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.import-history-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.import-history-status {
+  font-weight: 600;
+}
+
+.import-history-status--completed {
+  color: var(--success-color);
+}
+
+.import-history-status--undone {
+  color: var(--text-tertiary);
+}
+
+.import-history-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.import-history-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+
+.import-history-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.import-history-columns h5 {
+  margin: 0 0 0.5rem;
+  font-size: 12px;
+}
+
+.import-history-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.import-history-rows li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  padding: 8px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.import-history-rows li:last-child {
+  border-bottom: none;
+}
+
+.import-history-reason {
+  color: var(--warning-color);
+  font-size: 10px;
+}
+
+.import-history-row--failed {
+  color: var(--danger-color);
+}
+
+.import-history-empty,
+.import-history-loading {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+@media (max-width: 768px) {
+  .invoice-form-grid,
+  .import-history-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Savings Simulator */
 .simulator-view {
   display: flex;

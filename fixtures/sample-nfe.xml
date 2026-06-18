@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000190550010000001234567890123">
+      <ide>
+        <dhEmi>2026-06-12T14:30:00-03:00</dhEmi>
+        <nNF>12345</nNF>
+        <serie>1</serie>
+      </ide>
+      <emit>
+        <CNPJ>12345678000190</CNPJ>
+        <xNome>MERCADO SAO LUIZ LTDA</xNome>
+        <xFant>Sao Luiz</xFant>
+      </emit>
+      <det nItem="1">
+        <prod>
+          <cProd>001</cProd>
+          <xProd>COMPRA MERCADO</xProd>
+          <qCom>1.0000</qCom>
+          <vUnCom>89.9000000000</vUnCom>
+          <vProd>89.90</vProd>
+        </prod>
+      </det>
+      <total>
+        <ICMSTot>
+          <vNF>89.90</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+</nfeProc>

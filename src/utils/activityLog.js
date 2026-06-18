@@ -57,6 +57,9 @@ export const buildActivityMessage = (type, actorName, metadata = {}) => {
     case ACTIVITY_TYPES.INVITE_REJECTED:
       return `${who} rejeitou convite para o projeto`;
     case ACTIVITY_TYPES.IMPORT_COMPLETED:
+      if (metadata.type === 'invoice') {
+        return `${who} registrou nota fiscal (${metadata.count || 0} compra)`;
+      }
       return `${who} importou ${metadata.count || 0} transação(ões) de extrato`;
     case ACTIVITY_TYPES.IMPORT_UNDONE:
       return `${who} desfez importação de extrato (${metadata.count || 0} itens)`;

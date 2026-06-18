@@ -140,3 +140,23 @@ export const deleteTransactionsByIds = async (ids) => {
   await Promise.all(unique.map((id) => deleteDoc(doc(db, COLLECTION_NAME, id))));
   return { deleted: unique.length };
 };
+
+export const getTransactionsByImportBatchId = async (importBatchId) => {
+  if (!importBatchId) return [];
+  try {
+    const user = auth.currentUser;
+    if (!user) return [];
+
+    const q = query(
+      collection(db, COLLECTION_NAME),
+      where('importBatchId', '==', importBatchId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((t) => t.userId === user.uid);
+  } catch (error) {
+    console.error('Error fetching batch transactions:', error);
+    return [];
+  }
+};

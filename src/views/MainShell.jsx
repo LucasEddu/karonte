@@ -10,7 +10,7 @@ const PAGE_TITLES = {
   activity: 'Atividades',
   simulator: 'Simulador',
   family: 'Família',
-  import: 'Importar Extrato',
+  import: 'Importações',
   userSettings: 'Configurações de Conta',
   projectSettings: 'Configurações do Projeto',
 };

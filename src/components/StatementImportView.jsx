@@ -79,6 +79,7 @@ export default function StatementImportView({
   formatMoney,
   selectedMonth,
   selectedYear,
+  embedded = false,
 }) {
   const fileInputRef = useRef(null);
   const [fileEntries, setFileEntries] = useState([]);
@@ -307,6 +308,7 @@ export default function StatementImportView({
     let failed = 0;
     const errors = [];
     const importedIds = [];
+    const failedRows = [];
     const total = selectedRows.length;
 
     for (let i = 0; i < selectedRows.length; i += 1) {
@@ -315,6 +317,11 @@ export default function StatementImportView({
       const amount = parseFloat(String(row.amount).replace(',', '.'));
       if (!dateObj || Number.isNaN(dateObj.getTime()) || Number.isNaN(amount) || amount <= 0) {
         failed += 1;
+        failedRows.push({
+          description: row.description,
+          amount,
+          reason: 'data ou valor inválido',
+        });
         errors.push(`"${row.description}": data ou valor inválido`);
       } else {
         try {
@@ -337,6 +344,11 @@ export default function StatementImportView({
           imported += 1;
         } catch (e) {
           failed += 1;
+          failedRows.push({
+            description: row.description,
+            amount,
+            reason: e.message || 'erro ao salvar',
+          });
           errors.push(`"${row.description}": ${e.message || 'erro ao salvar'}`);
         }
       }
@@ -353,6 +365,14 @@ export default function StatementImportView({
 
     const ignored = parsedRows.length - selectedRows.length;
     const dupes = duplicateCount;
+    const skippedRows = parsedRows
+      .filter((r) => !r.selected)
+      .map((r) => ({
+        description: r.description,
+        amount: r.amount,
+        date: r.date instanceof Date ? r.date.toISOString() : r.date,
+        reason: r.isDuplicate || r.isPossibleDuplicate ? 'duplicate' : 'not_selected',
+      }));
 
     setSummary({
       imported,
@@ -364,8 +384,24 @@ export default function StatementImportView({
       importedIds,
     });
 
-    if (imported > 0 && onImportBatchComplete) {
-      onImportBatchComplete({ count: imported, importBatchId, importedIds });
+    if (onImportBatchComplete && importBatchId) {
+      onImportBatchComplete({
+        importBatchId,
+        type: 'statement',
+        fileNames: fileEntries.map((f) => f.name),
+        importedAt,
+        counts: {
+          detected: parsedRows.length,
+          imported,
+          failed,
+          ignored,
+          duplicates: dupes,
+        },
+        importedTransactionIds: importedIds,
+        failedRows,
+        skippedRows,
+        createdByName,
+      });
     }
 
     setFileEntries([]);
@@ -400,18 +436,17 @@ export default function StatementImportView({
   };
 
   if (!canAddToProject) {
-    return (
-      <main className="import-view main-content">
-        <div className="import-permission-denied card">
-          <h3>Importação indisponível</h3>
-          <p>Você não tem permissão para adicionar lançamentos neste projeto.</p>
-        </div>
-      </main>
+    const denied = (
+      <div className="import-permission-denied card">
+        <h3>Importação indisponível</h3>
+        <p>Você não tem permissão para adicionar lançamentos neste projeto.</p>
+      </div>
     );
+    return embedded ? denied : <main className="import-view main-content">{denied}</main>;
   }
 
-  return (
-    <main className="import-view main-content">
+  const content = (
+    <>
       <div className="import-intro card">
         <h3>Importar Extrato</h3>
         <p>
@@ -677,6 +712,8 @@ export default function StatementImportView({
           </div>
         </div>
       ) : null}
-    </main>
+    </>
   );
+
+  return embedded ? content : <main className="import-view main-content">{content}</main>;
 }

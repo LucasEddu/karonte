@@ -4,11 +4,13 @@ import HubView from './components/HubView';
 import TransactionDrawer from './components/TransactionDrawer';
 import ErrorBoundary from './components/ErrorBoundary';
 
-const StatementImportView = lazy(() => import('./components/StatementImportView'));
+const ImportHubView = lazy(() => import('./components/ImportHubView'));
 import { auth } from './config/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { login, register, logout, getAllUsers, toggleUserStatus, updateUsername, changeOwnPassword, sendPasswordReset } from './services/authService';
 import { addTransaction, getUserTransactions, getProjectTransactions, deleteTransaction, updateTransaction, deleteTransactionsByIds } from './services/transactionService';
+import { saveImportBatch, markImportBatchUndone } from './services/importBatchService';
+import { savePurchaseInvoice } from './services/purchaseInvoiceService';
 import { getUserBudgets, saveUserBudgets } from './services/budgetService';
 import { getUserCategories, saveUserCategories } from './services/categoriesService';
 import { getCreditCards, addCreditCard, deleteCreditCard } from './services/creditCardService';
@@ -684,8 +686,122 @@ function App() {
     return savedDoc;
   };
 
-  const handleImportBatchComplete = ({ count, importBatchId }) => {
-    recordActivityRef.current(ACTIVITY_TYPES.IMPORT_COMPLETED, importBatchId, { count });
+  const handleImportBatchComplete = async (batchPayload) => {
+    const createdByName =
+      currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
+
+    await saveImportBatch(batchPayload.importBatchId, {
+      projectId: activeProjectId || null,
+      type: batchPayload.type || 'statement',
+      fileNames: batchPayload.fileNames || [],
+      importedAt: batchPayload.importedAt,
+      status: batchPayload.counts?.failed > 0 ? 'partial' : 'completed',
+      counts: batchPayload.counts,
+      importedTransactionIds: batchPayload.importedTransactionIds || [],
+      importedInvoiceIds: batchPayload.importedInvoiceIds || [],
+      failedRows: batchPayload.failedRows || [],
+      skippedRows: batchPayload.skippedRows || [],
+      createdByName,
+      metadata: batchPayload.metadata || {},
+    });
+
+    recordActivityRef.current(ACTIVITY_TYPES.IMPORT_COMPLETED, batchPayload.importBatchId, {
+      count: batchPayload.counts?.imported || 0,
+      type: batchPayload.type || 'statement',
+      fileNames: batchPayload.fileNames || [],
+    });
+  };
+
+  const handleSaveInvoice = async (draft) => {
+    const createdByName =
+      currentUser?.username || currentUser?.displayName || currentUser?.email || currentUser?.uid;
+    const importBatchId = crypto.randomUUID();
+    const importedAt = new Date().toISOString();
+    const issueDate = draft.issueDate
+      ? new Date(`${draft.issueDate}T12:00:00`)
+      : new Date();
+    const categoryFields = buildTransactionCategoryFields(
+      draft.category,
+      'expense',
+      customCategories
+    );
+
+    const invoicePayload = {
+      issuerName: draft.issuerName,
+      issuerDocument: draft.issuerDocument,
+      accessKey: draft.accessKey,
+      invoiceNumber: draft.invoiceNumber,
+      series: draft.series,
+      issueDate: issueDate.toISOString(),
+      issueDateDisplay: issueDate.toLocaleDateString('pt-BR'),
+      totalAmount: draft.totalAmount,
+      items: draft.items || [],
+      purchaseDescription: draft.purchaseDescription,
+      type: 'expense',
+      category: draft.category,
+      notes: draft.notes || '',
+      sourceFormat: draft.sourceFormat,
+      importBatchId,
+      extractedAt: importedAt,
+      ...categoryFields,
+      createdByName,
+    };
+
+    const savedInvoice = await savePurchaseInvoice(invoicePayload, activeProjectId);
+
+    const savedTx = await addTransaction(
+      {
+        description: draft.purchaseDescription,
+        amount: draft.totalAmount,
+        type: 'expense',
+        ...categoryFields,
+        date: issueDate.toISOString(),
+        displayDate: issueDate.toLocaleDateString('pt-BR'),
+        paymentMethod: 'avulsa',
+        source: 'invoice_import',
+        importBatchId,
+        importedAt,
+        invoiceId: savedInvoice.id,
+        createdByName,
+      },
+      activeProjectId
+    );
+
+    setTransactions((prev) => [savedTx, ...prev]);
+
+    await saveImportBatch(importBatchId, {
+      projectId: activeProjectId || null,
+      type: 'invoice',
+      fileNames: draft.sourceFileName ? [draft.sourceFileName] : [],
+      importedAt,
+      status: 'completed',
+      counts: {
+        detected: 1,
+        imported: 1,
+        failed: 0,
+        ignored: 0,
+        duplicates: 0,
+      },
+      importedTransactionIds: [savedTx.id],
+      importedInvoiceIds: [savedInvoice.id],
+      failedRows: [],
+      skippedRows: [],
+      createdByName,
+      metadata: { purchaseDescription: draft.purchaseDescription },
+    });
+
+    recordActivityRef.current(ACTIVITY_TYPES.IMPORT_COMPLETED, importBatchId, {
+      count: 1,
+      type: 'invoice',
+      fileNames: draft.sourceFileName ? [draft.sourceFileName] : [],
+    });
+
+    return {
+      ...savedInvoice,
+      linkedTransactionId: savedTx.id,
+      purchaseDescription: draft.purchaseDescription,
+      totalAmount: draft.totalAmount,
+    };
   };
 
   const handleUndoImport = async ({ importedIds, importBatchId, count }) => {
@@ -696,6 +812,9 @@ function App() {
     await deleteTransactionsByIds(importedIds);
     const idSet = new Set(importedIds);
     setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
+    if (importBatchId) {
+      await markImportBatchUndone(importBatchId);
+    }
     recordActivityRef.current(ACTIVITY_TYPES.IMPORT_UNDONE, importBatchId || 'import-batch', {
       count: count || importedIds.length,
     });
@@ -1647,7 +1766,7 @@ function App() {
 
         {currentView === 'import' && (
           <Suspense fallback={<main className="main-content"><div className="card" style={{ padding: '2rem', textAlign: 'center' }}>Carregando importação…</div></main>}>
-            <StatementImportView
+            <ImportHubView
               currentUser={currentUser}
               activeProjectId={activeProjectId}
               activeProject={activeProject}
@@ -1656,9 +1775,11 @@ function App() {
               incomeCategories={incomeCategories}
               customCategories={customCategories}
               canAddToProject={canAddToProject}
+              canDeleteInProject={canDeleteInProject}
               onImportTransactions={handleStatementImport}
               onImportBatchComplete={handleImportBatchComplete}
               onUndoImport={handleUndoImport}
+              onSaveInvoice={handleSaveInvoice}
               formatMoney={formatMoney}
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
