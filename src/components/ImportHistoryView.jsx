@@ -92,7 +92,6 @@ export default function ImportHistoryView({
         importedIds: ids,
         count: ids.length,
       });
-      await markImportBatchUndone(detail.id);
       closeDetail();
       await loadBatches();
     } catch (e) {
