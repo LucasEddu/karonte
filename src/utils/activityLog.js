@@ -57,7 +57,7 @@ export const buildActivityMessage = (type, actorName, metadata = {}) => {
     case ACTIVITY_TYPES.INVITE_REJECTED:
       return `${who} rejeitou convite para o projeto`;
     case ACTIVITY_TYPES.IMPORT_COMPLETED:
-      return `${who} importou ${metadata.count || 0} transação(ões) de extrato PDF`;
+      return `${who} importou ${metadata.count || 0} transação(ões) de extrato`;
     case ACTIVITY_TYPES.IMPORT_UNDONE:
       return `${who} desfez importação de extrato (${metadata.count || 0} itens)`;
     default:
