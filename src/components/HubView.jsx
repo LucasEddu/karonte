@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { getTransactionCategoryLabel } from '../utils/financeCalculations';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
@@ -38,6 +38,50 @@ export default function HubView({
   onNavigateToView,
 }) {
   const forecast = calculateForecast();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+
+  const parseFilterAmount = (value) => {
+    if (!String(value).trim()) return null;
+    const n = parseFloat(String(value).replace(/\./g, '').replace(',', '.'));
+    return Number.isNaN(n) ? null : n;
+  };
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() || typeFilter !== 'all' || minAmount.trim() || maxAmount.trim()
+  );
+
+  const displayedTransactions = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const min = parseFilterAmount(minAmount);
+    const max = parseFilterAmount(maxAmount);
+
+    return filteredTransactions.filter((t) => {
+      if (typeFilter !== 'all' && t.type !== typeFilter) return false;
+
+      if (query) {
+        const desc = String(t.description || '').toLowerCase();
+        const cat = getTransactionCategoryLabel(t).toLowerCase();
+        if (!desc.includes(query) && !cat.includes(query)) return false;
+      }
+
+      const amount = Number(t.amount) || 0;
+      if (min !== null && amount < min) return false;
+      if (max !== null && amount > max) return false;
+
+      return true;
+    });
+  }, [filteredTransactions, searchQuery, typeFilter, minAmount, maxAmount]);
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setTypeFilter('all');
+    setMinAmount('');
+    setMaxAmount('');
+  };
 
   return (
     <main className="hub-layout main-content">
@@ -334,13 +378,82 @@ export default function HubView({
         <div className="hub-transactions-header list-header">
           <div>
             <h2>Últimos lançamentos</h2>
-            <span className="hub-transactions-count">{filteredTransactions.length} registros</span>
+            <span className="hub-transactions-count">
+              {hasActiveFilters
+                ? `${displayedTransactions.length} de ${filteredTransactions.length} registros`
+                : `${filteredTransactions.length} registros`}
+            </span>
           </div>
           {canAddToProject && (
             <button type="button" className="hub-add-btn submit-btn" onClick={onAddClick}>
               + Novo lançamento
             </button>
           )}
+        </div>
+
+        <div className="hub-transactions-search">
+          <div className="hub-transactions-search-row">
+            <input
+              type="search"
+              className="hub-transactions-search-input"
+              placeholder="Buscar por nome ou categoria…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Buscar lançamentos"
+            />
+            <div className="hub-transactions-type-filter">
+              <button
+                type="button"
+                className={`calendar-filter-btn ${typeFilter === 'all' ? 'active' : ''}`}
+                onClick={() => setTypeFilter('all')}
+              >
+                Todos
+              </button>
+              <button
+                type="button"
+                className={`calendar-filter-btn ${typeFilter === 'expense' ? 'active' : ''}`}
+                onClick={() => setTypeFilter('expense')}
+              >
+                Despesas
+              </button>
+              <button
+                type="button"
+                className={`calendar-filter-btn ${typeFilter === 'income' ? 'active' : ''}`}
+                onClick={() => setTypeFilter('income')}
+              >
+                Receitas
+              </button>
+            </div>
+          </div>
+          <div className="hub-transactions-search-row hub-transactions-search-row--amounts">
+            <label className="hub-transactions-amount-field">
+              <span>Valor mín.</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={minAmount}
+                onChange={(e) => setMinAmount(e.target.value)}
+                aria-label="Valor mínimo"
+              />
+            </label>
+            <label className="hub-transactions-amount-field">
+              <span>Valor máx.</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0,00"
+                value={maxAmount}
+                onChange={(e) => setMaxAmount(e.target.value)}
+                aria-label="Valor máximo"
+              />
+            </label>
+            {hasActiveFilters ? (
+              <button type="button" className="text-btn hub-transactions-clear" onClick={clearFilters}>
+                Limpar filtros
+              </button>
+            ) : null}
+          </div>
         </div>
 
         <div className="history-list">
@@ -351,8 +464,13 @@ export default function HubView({
                 <button type="button" className="text-btn hub-empty-action" onClick={onAddClick}>Adicionar primeiro lançamento</button>
               )}
             </div>
+          ) : displayedTransactions.length === 0 ? (
+            <div className="hub-empty hub-empty--center">
+              Nenhum lançamento corresponde aos filtros.
+              <button type="button" className="text-btn hub-empty-action" onClick={clearFilters}>Limpar filtros</button>
+            </div>
           ) : (
-            filteredTransactions.map(t => (
+            displayedTransactions.map(t => (
               <div
                 key={t.id}
                 className={`history-item ${canAddToProject ? 'history-item--clickable' : ''}`}

@@ -3378,6 +3378,101 @@ h1, h2, h3, h4 { font-weight: 500; }
   white-space: nowrap;
 }
 
+.hub-transactions-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hub-transactions-search-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.hub-transactions-search-row--amounts {
+  align-items: flex-end;
+}
+
+.hub-transactions-search-input {
+  flex: 1 1 200px;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.hub-transactions-search-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.hub-transactions-type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.hub-transactions-amount-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.hub-transactions-amount-field input {
+  width: 7rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.hub-transactions-amount-field input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.hub-transactions-clear {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+@media (max-width: 600px) {
+  .hub-transactions-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .hub-transactions-type-filter {
+    width: 100%;
+  }
+
+  .hub-transactions-type-filter .calendar-filter-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  .hub-transactions-amount-field input {
+    width: 100%;
+  }
+
+  .hub-transactions-clear {
+    margin-left: 0;
+    align-self: flex-start;
+  }
+}
+
 /* Transaction drawer */
 .transaction-drawer-overlay {
   position: fixed;
