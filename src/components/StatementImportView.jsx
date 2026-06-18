@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
-  validatePdfFile,
-  extractTextFromMultiplePdfs,
+  validateStatementFile,
+  processStatementFiles,
   getImportErrorMessage,
-  MAX_PDF_SIZE_BYTES,
+  MAX_FILE_SIZE_BYTES,
+  ACCEPTED_EXTENSIONS,
 } from '../services/statementImportService';
 import { markDuplicates, createTransactionHash, findDuplicateMatch } from '../utils/statementParser';
 
@@ -74,7 +75,7 @@ export default function StatementImportView({
     const errors = [];
 
     for (const file of incoming) {
-      const validation = validatePdfFile(file);
+      const validation = validateStatementFile(file);
       if (!validation.valid) {
         errors.push(`${file.name}: ${getImportErrorMessage(validation.error)}`);
         continue;
@@ -128,7 +129,7 @@ export default function StatementImportView({
 
     try {
       const referenceYear = selectedYear || new Date().getFullYear();
-      const results = await extractTextFromMultiplePdfs(files, {
+      const results = await processStatementFiles(files, {
         parseOptions: { customCategories, referenceYear },
         onFileProgress: (index, status, fileName, errorMsg) => {
           setFileEntries((prev) =>
@@ -167,13 +168,13 @@ export default function StatementImportView({
         setGlobalError(
           errorCount > 0
             ? 'Nenhuma transação detectada. Verifique os erros por arquivo acima.'
-            : 'Nenhuma transação detectada nos PDFs selecionados.'
+            : 'Nenhuma transação detectada nos arquivos selecionados.'
         );
       } else if (errorCount > 0) {
         setGlobalError(`${successCount} arquivo(s) processado(s), ${errorCount} com erro.`);
       }
     } catch (err) {
-      setGlobalError(err.message || 'Erro ao processar os PDFs.');
+      setGlobalError(err.message || 'Erro ao processar os arquivos.');
     } finally {
       setIsProcessing(false);
     }
@@ -274,7 +275,7 @@ export default function StatementImportView({
           date: dateObj.toISOString(),
           displayDate: dateObj.toLocaleDateString('pt-BR'),
           paymentMethod: 'avulsa',
-          source: 'statement_pdf',
+          source: 'statement_import',
           importBatchId,
           importedAt,
           rawDescription: row.rawDescription || row.description,
@@ -350,10 +351,10 @@ export default function StatementImportView({
   return (
     <main className="import-view main-content">
       <div className="import-intro card">
-        <h3>Importar Extrato (PDF)</h3>
+        <h3>Importar Extrato</h3>
         <p>
-          Selecione um ou mais extratos bancários em PDF. O processamento é feito <strong>100% no seu navegador</strong> —
-          os arquivos não são enviados nem armazenados em nenhum servidor.
+          Selecione extratos bancários em <strong>PDF, CSV, XLS/XLSX ou OFX</strong>. O processamento é feito{' '}
+          <strong>100% no seu navegador</strong> — os arquivos não são enviados nem armazenados em nenhum servidor.
         </p>
         {activeProjectId && activeProject ? (
           <p className="import-context">
@@ -367,7 +368,9 @@ export default function StatementImportView({
             Datas sem ano no extrato usam o período selecionado: {String(selectedMonth).padStart(2, '0')}/{selectedYear}
           </p>
         ) : null}
-        <p className="import-hint">Limite: {MAX_PDF_SIZE_BYTES / (1024 * 1024)} MB por arquivo • Apenas .pdf • Texto selecionável (sem OCR)</p>
+        <p className="import-hint">
+          Limite: {MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB por arquivo • {ACCEPTED_EXTENSIONS.join(', ')} • PDF exige texto selecionável (sem OCR)
+        </p>
       </div>
 
       {globalError ? <div className="import-alert import-alert--error">{globalError}</div> : null}
@@ -414,14 +417,14 @@ export default function StatementImportView({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,application/pdf"
+          accept=".pdf,.csv,.xls,.xlsx,.ofx,.qfx,application/pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           multiple
           className="import-file-input"
           onChange={handleFileInput}
         />
         <span className="import-dropzone-icon">📄</span>
-        <p className="import-dropzone-title">Clique ou arraste PDFs aqui</p>
-        <p className="import-dropzone-sub">Múltiplos arquivos suportados</p>
+        <p className="import-dropzone-title">Clique ou arraste arquivos aqui</p>
+        <p className="import-dropzone-sub">PDF, CSV, XLS/XLSX, OFX — múltiplos arquivos suportados</p>
       </div>
 
       {fileEntries.length > 0 ? (
@@ -435,7 +438,7 @@ export default function StatementImportView({
                 onClick={handleProcess}
                 disabled={isProcessing || isImporting}
               >
-                {isProcessing ? 'Processando…' : 'Processar PDFs'}
+                {isProcessing ? 'Processando…' : 'Processar arquivos'}
               </button>
               <button type="button" className="text-btn" onClick={handleClear} disabled={isProcessing || isImporting}>
                 Limpar importação

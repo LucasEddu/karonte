@@ -1,6 +1,12 @@
 import { parseStatementText, parseMultipleStatementTexts } from '../utils/statementParser';
+import {
+  parseCsvText,
+  parseOfxText,
+  parseSpreadsheetRows,
+} from '../utils/structuredStatementParser';
 
 let pdfjsReady;
+let xlsxReady;
 
 const getPdfJs = async () => {
   if (pdfjsReady) return pdfjsReady;
@@ -22,22 +28,41 @@ const getPdfJs = async () => {
   return pdfjsReady;
 };
 
-export const MAX_PDF_SIZE_BYTES = 5 * 1024 * 1024;
+const getXlsx = async () => {
+  if (xlsxReady) return xlsxReady;
+  xlsxReady = await import('xlsx');
+  return xlsxReady;
+};
+
+export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+export const MAX_PDF_SIZE_BYTES = MAX_FILE_SIZE_BYTES;
 export const MIN_CHARS_PER_PAGE = 25;
 
+export const STATEMENT_FORMATS = {
+  PDF: 'pdf',
+  CSV: 'csv',
+  XLS: 'xls',
+  OFX: 'ofx',
+};
+
 export const IMPORT_ERRORS = {
+  UNSUPPORTED: 'UNSUPPORTED',
   NOT_PDF: 'NOT_PDF',
   TOO_LARGE: 'TOO_LARGE',
   PASSWORD: 'PASSWORD',
   SCANNED: 'SCANNED',
   NO_TEXT: 'NO_TEXT',
   NO_TRANSACTIONS: 'NO_TRANSACTIONS',
+  PARSE_FAILED: 'PARSE_FAILED',
 };
+
+export const ACCEPTED_EXTENSIONS = ['.pdf', '.csv', '.xls', '.xlsx', '.ofx', '.qfx'];
 
 export const getImportErrorMessage = (code) => {
   switch (code) {
+    case IMPORT_ERRORS.UNSUPPORTED:
     case IMPORT_ERRORS.NOT_PDF:
-      return 'Apenas arquivos PDF são aceitos.';
+      return 'Formato não suportado. Use PDF, CSV, XLS, XLSX ou OFX.';
     case IMPORT_ERRORS.TOO_LARGE:
       return 'O arquivo excede o limite de 5 MB.';
     case IMPORT_ERRORS.PASSWORD:
@@ -45,30 +70,67 @@ export const getImportErrorMessage = (code) => {
     case IMPORT_ERRORS.SCANNED:
       return 'PDF sem texto extraível. OCR não suportado nesta versão.';
     case IMPORT_ERRORS.NO_TEXT:
-      return 'Não foi possível extrair texto deste PDF.';
+      return 'Não foi possível ler o conteúdo do arquivo.';
     case IMPORT_ERRORS.NO_TRANSACTIONS:
       return 'Nenhuma transação foi detectada neste extrato.';
+    case IMPORT_ERRORS.PARSE_FAILED:
+      return 'Erro ao interpretar o arquivo. Verifique se o formato está correto.';
     default:
-      return 'Erro ao processar o PDF.';
+      return 'Erro ao processar o arquivo.';
   }
 };
 
+export const detectStatementFormat = (file) => {
+  if (!file?.name) return null;
+  const name = file.name.toLowerCase();
+
+  if (name.endsWith('.pdf') || file.type === 'application/pdf') return STATEMENT_FORMATS.PDF;
+  if (name.endsWith('.csv') || file.type === 'text/csv') return STATEMENT_FORMATS.CSV;
+  if (
+    name.endsWith('.xls') ||
+    name.endsWith('.xlsx') ||
+    file.type === 'application/vnd.ms-excel' ||
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  ) {
+    return STATEMENT_FORMATS.XLS;
+  }
+  if (name.endsWith('.ofx') || name.endsWith('.qfx')) return STATEMENT_FORMATS.OFX;
+
+  return null;
+};
+
+export const validateStatementFile = (file) => {
+  if (!file) return { valid: false, error: IMPORT_ERRORS.UNSUPPORTED };
+
+  const format = detectStatementFormat(file);
+  if (!format) return { valid: false, error: IMPORT_ERRORS.UNSUPPORTED };
+  if (file.size > MAX_FILE_SIZE_BYTES) return { valid: false, error: IMPORT_ERRORS.TOO_LARGE };
+
+  return { valid: true, format };
+};
+
+/** @deprecated use validateStatementFile */
 export const validatePdfFile = (file) => {
-  if (!file) return { valid: false, error: IMPORT_ERRORS.NOT_PDF };
-  const isPdf =
-    file.type === 'application/pdf' ||
-    file.name.toLowerCase().endsWith('.pdf');
-  if (!isPdf) return { valid: false, error: IMPORT_ERRORS.NOT_PDF };
-  if (file.size > MAX_PDF_SIZE_BYTES) return { valid: false, error: IMPORT_ERRORS.TOO_LARGE };
-  return { valid: true };
+  const result = validateStatementFile(file);
+  if (!result.valid && result.error === IMPORT_ERRORS.UNSUPPORTED) {
+    return { valid: false, error: IMPORT_ERRORS.NOT_PDF };
+  }
+  if (result.valid && result.format !== STATEMENT_FORMATS.PDF) {
+    return { valid: false, error: IMPORT_ERRORS.NOT_PDF };
+  }
+  return result.valid ? { valid: true } : { valid: false, error: result.error };
+};
+
+const throwImportError = (code) => {
+  const err = new Error(code);
+  err.code = code;
+  throw err;
 };
 
 export const extractTextFromPdf = async (file) => {
-  const validation = validatePdfFile(file);
-  if (!validation.valid) {
-    const err = new Error(validation.error);
-    err.code = validation.error;
-    throw err;
+  const validation = validateStatementFile(file);
+  if (!validation.valid || validation.format !== STATEMENT_FORMATS.PDF) {
+    throwImportError(validation.error || IMPORT_ERRORS.NOT_PDF);
   }
 
   const pdfjsLib = await getPdfJs();
@@ -78,9 +140,7 @@ export const extractTextFromPdf = async (file) => {
     const raw = await file.arrayBuffer();
     buffer = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
   } catch {
-    const err = new Error(IMPORT_ERRORS.NO_TEXT);
-    err.code = IMPORT_ERRORS.NO_TEXT;
-    throw err;
+    throwImportError(IMPORT_ERRORS.NO_TEXT);
   }
 
   let pdf;
@@ -90,13 +150,9 @@ export const extractTextFromPdf = async (file) => {
   } catch (e) {
     const msg = String(e?.message || e || '').toLowerCase();
     if (msg.includes('password') || e?.name === 'PasswordException') {
-      const err = new Error(IMPORT_ERRORS.PASSWORD);
-      err.code = IMPORT_ERRORS.PASSWORD;
-      throw err;
+      throwImportError(IMPORT_ERRORS.PASSWORD);
     }
-    const err = new Error(IMPORT_ERRORS.NO_TEXT);
-    err.code = IMPORT_ERRORS.NO_TEXT;
-    throw err;
+    throwImportError(IMPORT_ERRORS.NO_TEXT);
   } finally {
     buffer = null;
   }
@@ -125,32 +181,77 @@ export const extractTextFromPdf = async (file) => {
   const fullText = pageTexts.join('\n');
 
   if (totalChars < pdf.numPages * MIN_CHARS_PER_PAGE) {
-    const err = new Error(IMPORT_ERRORS.SCANNED);
-    err.code = IMPORT_ERRORS.SCANNED;
-    throw err;
+    throwImportError(IMPORT_ERRORS.SCANNED);
   }
 
   if (!fullText.trim()) {
-    const err = new Error(IMPORT_ERRORS.NO_TEXT);
-    err.code = IMPORT_ERRORS.NO_TEXT;
-    throw err;
+    throwImportError(IMPORT_ERRORS.NO_TEXT);
   }
 
   return fullText;
 };
 
-export const parsePdfFile = async (file, options = {}) => {
+const parsePdfTransactions = async (file, options) => {
   const text = await extractTextFromPdf(file);
-  const transactions = parseStatementText(text, options);
-  if (transactions.length === 0) {
-    const err = new Error(IMPORT_ERRORS.NO_TRANSACTIONS);
-    err.code = IMPORT_ERRORS.NO_TRANSACTIONS;
-    throw err;
+  return parseStatementText(text, options);
+};
+
+const parseCsvTransactions = async (file, options) => {
+  const text = await file.text();
+  return parseCsvText(text, options);
+};
+
+const parseXlsTransactions = async (file, options) => {
+  const XLSX = await getXlsx();
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: false });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {
+    header: 1,
+    defval: '',
+    raw: false,
+  });
+
+  return parseSpreadsheetRows(rows, options);
+};
+
+const parseOfxTransactions = async (file, options) => {
+  const text = await file.text();
+  return parseOfxText(text, options);
+};
+
+export const parseStatementFile = async (file, options = {}) => {
+  const validation = validateStatementFile(file);
+  if (!validation.valid) throwImportError(validation.error);
+
+  let transactions;
+  switch (validation.format) {
+    case STATEMENT_FORMATS.PDF:
+      transactions = await parsePdfTransactions(file, options);
+      break;
+    case STATEMENT_FORMATS.CSV:
+      transactions = await parseCsvTransactions(file, options);
+      break;
+    case STATEMENT_FORMATS.XLS:
+      transactions = await parseXlsTransactions(file, options);
+      break;
+    case STATEMENT_FORMATS.OFX:
+      transactions = await parseOfxTransactions(file, options);
+      break;
+    default:
+      throwImportError(IMPORT_ERRORS.UNSUPPORTED);
   }
+
+  if (!transactions?.length) throwImportError(IMPORT_ERRORS.NO_TRANSACTIONS);
   return transactions;
 };
 
-export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parseOptions } = {}) => {
+/** @deprecated use parseStatementFile */
+export const parsePdfFile = async (file, options = {}) => parseStatementFile(file, options);
+
+export const processStatementFiles = async (files, { onFileProgress, parseOptions } = {}) => {
   const results = [];
 
   for (let i = 0; i < files.length; i += 1) {
@@ -158,13 +259,7 @@ export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parse
     onFileProgress?.(i, 'processing', file.name);
 
     try {
-      const text = await extractTextFromPdf(file);
-      const transactions = parseStatementText(text, parseOptions);
-      if (transactions.length === 0) {
-        const err = new Error(IMPORT_ERRORS.NO_TRANSACTIONS);
-        err.code = IMPORT_ERRORS.NO_TRANSACTIONS;
-        throw err;
-      }
+      const transactions = await parseStatementFile(file, parseOptions);
       results.push({
         fileName: file.name,
         status: 'done',
@@ -173,7 +268,7 @@ export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parse
       });
       onFileProgress?.(i, 'done', file.name);
     } catch (e) {
-      const code = e.code || IMPORT_ERRORS.NO_TEXT;
+      const code = e.code || IMPORT_ERRORS.PARSE_FAILED;
       results.push({
         fileName: file.name,
         status: 'error',
@@ -189,5 +284,8 @@ export const extractTextFromMultiplePdfs = async (files, { onFileProgress, parse
 
   return results;
 };
+
+/** @deprecated use processStatementFiles */
+export const extractTextFromMultiplePdfs = processStatementFiles;
 
 export { parseMultipleStatementTexts };
