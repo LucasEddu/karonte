@@ -3862,6 +3862,8 @@ h1, h2, h3, h4 { font-weight: 500; }
 .import-table th:nth-child(1),
 .import-table td:nth-child(1) {
   width: 40px;
+  vertical-align: middle;
+  text-align: center;
 }
 
 .import-table th:nth-child(2),
@@ -3953,18 +3955,66 @@ h1, h2, h3, h4 { font-weight: 500; }
 
 .import-review-footer {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.85rem;
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid var(--border-light);
 }
 
+.import-review-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
 .import-selected-count {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.import-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.import-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.import-progress-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.import-progress-percent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-color);
+}
+
+.import-progress-bg {
+  height: 8px;
+  background-color: var(--border-medium);
+}
+
+.import-progress-fill {
+  background: linear-gradient(90deg, var(--primary-color), var(--balance-color));
+  transition: width 180ms ease;
+}
+
+.import-progress-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
 }
 
 @media (max-width: 768px) {

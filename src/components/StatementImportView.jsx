@@ -15,6 +15,34 @@ const STATUS_LABELS = {
   error: 'Erro',
 };
 
+function ImportProgressBar({ title, current, total, detail }) {
+  const safeTotal = Math.max(total, 1);
+  const percent = Math.min(100, Math.round((current / safeTotal) * 100));
+
+  return (
+    <div
+      className="import-progress"
+      role="progressbar"
+      aria-valuenow={percent}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={title}
+    >
+      <div className="import-progress-header">
+        <span className="import-progress-title">{title}</span>
+        <span className="import-progress-percent">{percent}%</span>
+      </div>
+      <div className="progress-bg import-progress-bg">
+        <div className="progress-fill import-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+      <p className="import-progress-meta">
+        {current} de {total}
+        {detail ? ` • ${detail}` : ''}
+      </p>
+    </div>
+  );
+}
+
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -63,6 +91,8 @@ export default function StatementImportView({
   const [summary, setSummary] = useState(null);
   const [globalError, setGlobalError] = useState('');
   const [isUndoing, setIsUndoing] = useState(false);
+  const [processProgress, setProcessProgress] = useState(null);
+  const [importProgress, setImportProgress] = useState(null);
 
   const addFiles = useCallback((fileList) => {
     const incoming = Array.from(fileList || []);
@@ -119,6 +149,7 @@ export default function StatementImportView({
     setSummary(null);
     setGlobalError('');
     setParsedRows([]);
+    setProcessProgress({ current: 0, total: fileEntries.length, detail: 'Iniciando…' });
 
     const batchId = crypto.randomUUID();
     setImportBatchId(batchId);
@@ -142,6 +173,22 @@ export default function StatementImportView({
               };
             })
           );
+
+          const completed =
+            status === 'done' || status === 'error'
+              ? index + 1
+              : index + 0.5;
+
+          setProcessProgress({
+            current: completed,
+            total: files.length,
+            detail:
+              status === 'processing'
+                ? `Processando ${fileName}…`
+                : status === 'error'
+                  ? `Erro em ${fileName}`
+                  : `Concluído ${fileName}`,
+          });
         },
       });
 
@@ -177,6 +224,7 @@ export default function StatementImportView({
       setGlobalError(err.message || 'Erro ao processar os arquivos.');
     } finally {
       setIsProcessing(false);
+      setProcessProgress(null);
     }
   };
 
@@ -187,6 +235,8 @@ export default function StatementImportView({
     setSummary(null);
     setGlobalError('');
     setHideDuplicates(false);
+    setProcessProgress(null);
+    setImportProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -247,6 +297,7 @@ export default function StatementImportView({
 
     setIsImporting(true);
     setGlobalError('');
+    setImportProgress({ current: 0, total: selectedRows.length, detail: 'Salvando transações…' });
 
     const importedAt = new Date().toISOString();
     const createdByName =
@@ -256,37 +307,47 @@ export default function StatementImportView({
     let failed = 0;
     const errors = [];
     const importedIds = [];
+    const total = selectedRows.length;
 
-    for (const row of selectedRows) {
+    for (let i = 0; i < selectedRows.length; i += 1) {
+      const row = selectedRows[i];
       const dateObj = row.date instanceof Date ? row.date : new Date(row.date);
       const amount = parseFloat(String(row.amount).replace(',', '.'));
       if (!dateObj || Number.isNaN(dateObj.getTime()) || Number.isNaN(amount) || amount <= 0) {
         failed += 1;
         errors.push(`"${row.description}": data ou valor inválido`);
-        continue;
+      } else {
+        try {
+          const saved = await onImportTransactions({
+            description: row.description.trim(),
+            amount,
+            type: row.type,
+            category: row.category,
+            date: dateObj.toISOString(),
+            displayDate: dateObj.toLocaleDateString('pt-BR'),
+            paymentMethod: 'avulsa',
+            source: 'statement_import',
+            importBatchId,
+            importedAt,
+            rawDescription: row.rawDescription || row.description,
+            duplicateHash: row.duplicateHash || createTransactionHash(row),
+            createdByName,
+          });
+          if (saved?.id) importedIds.push(saved.id);
+          imported += 1;
+        } catch (e) {
+          failed += 1;
+          errors.push(`"${row.description}": ${e.message || 'erro ao salvar'}`);
+        }
       }
 
-      try {
-        const saved = await onImportTransactions({
-          description: row.description.trim(),
-          amount,
-          type: row.type,
-          category: row.category,
-          date: dateObj.toISOString(),
-          displayDate: dateObj.toLocaleDateString('pt-BR'),
-          paymentMethod: 'avulsa',
-          source: 'statement_import',
-          importBatchId,
-          importedAt,
-          rawDescription: row.rawDescription || row.description,
-          duplicateHash: row.duplicateHash || createTransactionHash(row),
-          createdByName,
+      const processed = i + 1;
+      if (processed === total || processed % 10 === 0) {
+        setImportProgress({
+          current: processed,
+          total,
+          detail: `${imported} importada(s), ${failed} falha(s)`,
         });
-        if (saved?.id) importedIds.push(saved.id);
-        imported += 1;
-      } catch (e) {
-        failed += 1;
-        errors.push(`"${row.description}": ${e.message || 'erro ao salvar'}`);
       }
     }
 
@@ -311,6 +372,7 @@ export default function StatementImportView({
     setParsedRows([]);
     setImportBatchId(null);
     setHideDuplicates(false);
+    setImportProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     setIsImporting(false);
@@ -445,6 +507,14 @@ export default function StatementImportView({
               </button>
             </div>
           </div>
+          {isProcessing && processProgress ? (
+            <ImportProgressBar
+              title="Processando arquivos"
+              current={processProgress.current}
+              total={processProgress.total}
+              detail={processProgress.detail}
+            />
+          ) : null}
           <ul className="import-file-list">
             {fileEntries.map((entry) => (
               <li key={entry.id} className={`import-file-item import-file-item--${entry.status}`}>
@@ -583,17 +653,27 @@ export default function StatementImportView({
           </div>
 
           <div className="import-review-footer">
-            <span className="import-selected-count">
-              {selectedRows.length} selecionada(s) • Total: R$ {formatMoney(selectedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0))}
-            </span>
-            <button
-              type="button"
-              className="submit-btn"
-              onClick={handleImport}
-              disabled={isImporting || selectedRows.length === 0}
-            >
-              {isImporting ? 'Importando…' : 'Importar selecionadas'}
-            </button>
+            {isImporting && importProgress ? (
+              <ImportProgressBar
+                title="Importando transações"
+                current={importProgress.current}
+                total={importProgress.total}
+                detail={importProgress.detail}
+              />
+            ) : null}
+            <div className="import-review-footer-actions">
+              <span className="import-selected-count">
+                {selectedRows.length} selecionada(s) • Total: R$ {formatMoney(selectedRows.reduce((s, r) => s + (Number(r.amount) || 0), 0))}
+              </span>
+              <button
+                type="button"
+                className="submit-btn"
+                onClick={handleImport}
+                disabled={isImporting || selectedRows.length === 0}
+              >
+                {isImporting ? 'Importando…' : 'Importar selecionadas'}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
