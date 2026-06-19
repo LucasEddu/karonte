@@ -28,7 +28,10 @@
 18. [Scripts npm](#18-scripts-npm)
 19. [Limitações e pendências conhecidas](#19-limitações-e-pendências-conhecidas)
 20. [Importações (extratos e notas fiscais)](#20-importações-extratos-e-notas-fiscais)
-21. [Refatoração em andamento (prioridades técnicas)](#21-refatoração-em-andamento-prioridades-técnicas)
+21. [Analytics e inteligência financeira](#21-analytics-e-inteligência-financeira)
+22. [Calendário, assinaturas, família e simulador](#22-calendário-assinaturas-família-e-simulador)
+23. [Performance Firestore (cache, batch, dedup)](#23-performance-firestore-cache-batch-dedup)
+24. [Refatoração em andamento (prioridades técnicas)](#24-refatoração-em-andamento-prioridades-técnicas)
 
 ---
 
@@ -41,9 +44,16 @@ O **Karonte** é um aplicativo web de finanças pessoais com suporte a **projeto
 | **Finanças pessoais** | Lançamentos de receita/despesa, categorias customizáveis, orçamentos por categoria, cartões de crédito, regra 50-30-20 |
 | **Projetos compartilhados** | Criação de projetos, convites por e-mail, papéis de colaborador, transações e tarefas por projeto |
 | **Tarefas** | Lista de tarefas e despesas com meta, parcelas e abatimento de pagamentos |
-| **Dashboard (Hub)** | KPIs, gráficos (6 meses), previsão de gastos, alertas rápidos |
+| **Dashboard (Hub)** | KPIs, gráficos (6 meses), previsão de gastos, alertas rápidos, busca/filtros e paginação |
+| **Analytics** | Fluxo de caixa projetado, comparador de períodos, detector de vazamentos financeiros |
+| **Calendário** | Visão mensal com lançamentos, parcelas, recorrentes, faturas de cartão e tarefas |
+| **Assinaturas** | Detecção automática de gastos recorrentes; confirmação e gestão manual |
+| **Modo família** | Resumo de gastos por membro em projetos compartilhados |
+| **Simulador** | Projeção de economia por categoria ou assinatura |
+| **Atividades** | Feed de ações recentes no escopo (lançamentos, tarefas, importações) |
 | **Assistente** | Chat com NLP simples para consultas e registro de lançamentos; suporte a voz (Web Speech API) |
-| **Importações** | Extratos (PDF, CSV, XLS/XLSX, OFX), notas fiscais (XML/PDF) e histórico de lotes |
+| **Importações** | Extratos (PDF, CSV, XLS/XLSX, OFX), notas fiscais (XML/PDF), histórico de lotes e desfazer |
+| **Performance** | Cache local por escopo, queries por janela de datas, escrita em batch, dedup local |
 | **Administração** | Painel admin para gestão de usuários (bloqueio, reset de senha, edição de username) |
 | **Mobile** | UI responsiva + PWA instalável; shell Android via Capacitor |
 
@@ -117,16 +127,20 @@ karonte/
 │   │   └── useChatAssistant.js
 │   │
 │   ├── views/
-│   │   ├── MainShell.jsx    ← Sidebar, header mobile, nav, top-bar
+│   │   ├── MainShell.jsx           ← Sidebar, header mobile, nav, top-bar
 │   │   ├── LoadingView.jsx, AuthView.jsx, AdminApp.jsx
 │   │   ├── UserSettingsView.jsx, ProjectSettingsView.jsx
 │   │   ├── BudgetsView.jsx, TasksView.jsx
+│   │   ├── CashFlowForecastView.jsx, PeriodComparisonView.jsx, FinancialLeaksView.jsx
+│   │   ├── FinancialCalendarView.jsx, SubscriptionsView.jsx, FamilyModeView.jsx
+│   │   ├── SavingsSimulatorView.jsx, ActivityFeedView.jsx
 │   │   └── (import lazy) ImportHubView em components/
 │   │
 │   ├── components/
 │   │   ├── HubView.jsx, TransactionDrawer.jsx, ChatAssistant.jsx
 │   │   ├── ImportHubView.jsx, StatementImportView.jsx, InvoiceImportView.jsx
 │   │   ├── ImportHistoryView.jsx
+│   │   ├── dev/FirestoreUsageDebugPanel.jsx  ← Somente DEV
 │   │   ├── ProjectSelectorDropdown.jsx, NotificationsDropdown.jsx
 │   │   ├── ErrorBoundary.jsx
 │   │   └── modals/          ← Budget, Project, Task, Payment, DeleteProject
@@ -135,7 +149,11 @@ karonte/
 │   │   ├── categoryModel.js, budgetModel.js, categoryDetection.js
 │   │   ├── chatParser.js, financeCalculations.js, money.js
 │   │   ├── taskCalculations.js, statementParser.js, structuredStatementParser.js
-│   │   ├── invoiceParser.js
+│   │   ├── invoiceParser.js, importDeduplication.js, importFingerprint.js
+│   │   ├── importBatchBackfill.js, transactionLoader.js, dataCache.js
+│   │   ├── cashFlowForecast.js, periodComparison.js, financialLeakDetector.js
+│   │   ├── financialCalendar.js, subscriptionDetection.js, familyModeCalculations.js
+│   │   ├── savingsSimulator.js, activityLog.js, firestoreDebug.js
 │   │   └── __tests__/       ← Vitest
 │   │
 │   └── services/            ← Camada de acesso ao Firestore
@@ -151,7 +169,11 @@ karonte/
 │       ├── insightService.js
 │       ├── statementImportService.js
 │       ├── importBatchService.js
-│       └── purchaseInvoiceService.js
+│       ├── purchaseInvoiceService.js
+│       ├── subscriptionsService.js
+│       ├── activityService.js
+│       ├── savingsScenariosService.js
+│       └── recurrenceService.js
 │
 └── android/                 ← Projeto Capacitor Android
     └── app/src/main/...
@@ -455,11 +477,17 @@ ID do documento: `buildInsightCacheId(uid, month, year, projectId)` → `{uid}_{
 | Função | Descrição |
 |--------|-----------|
 | `addTransaction(data, projectId?)` | Cria lançamento com `createdByUid/Name` |
-| `getUserTransactions(userId, projectId?)` | Transações do usuário; `null` filtra Geral |
-| `getProjectTransactions(projectId)` | Todas as transações do projeto |
-| `deleteTransaction(id)` | Remove lançamento |
-| `deleteTransactionsByIds(ids)` | Remove vários (desfazer importação) |
+| `addTransactionsBatch(list, projectId?)` | Escrita em batch (chunks de 450); retorna `{ created, failed }` |
+| `getTransactionsForDateWindow({ userId, projectId, startDate, endDate })` | Query por janela de datas (Geral ou Projeto) |
+| `getTransactionsForMonths({ userId, projectId, monthsBack })` | Janela rolante (ex.: últimos 6 ou 18 meses) |
+| `getRecentTransactions({ userId, projectId, limitCount })` | Transações recentes com limite |
+| `getTransactionHashesForWindow(params)` | Metadados leves para deduplicação (hash, data, valor) |
 | `getTransactionsByImportBatchId(batchId)` | Transações de um lote |
+| `getTransactionsByImportBatchIds(batchIds)` | Vários lotes em paralelo |
+| `getImportBatchTransactionIds(batchId)` | Apenas IDs de um lote |
+| `deleteTransaction(id)` | Remove lançamento |
+| `deleteTransactionsByIds(ids)` | Remove vários em batch (desfazer importação) |
+| `getUserTransactions` / `getProjectTransactions` | **Deprecated** — usar funções por janela acima |
 
 ### `statementImportService.js`
 
@@ -475,10 +503,14 @@ Parsers: `statementParser.js` (PDF texto), `structuredStatementParser.js` (CSV/O
 
 | Função | Descrição |
 |--------|-----------|
-| `saveImportBatch(batchId, data)` | Persiste lote de importação |
-| `getImportBatchesForScope(userId, projectId?)` | Histórico por escopo |
-| `getImportBatch(batchId)` | Detalhe de um lote |
+| `saveImportBatch(batchId, data)` | Persiste lote com fingerprint, período e counts |
+| `getImportBatchesForScope(userId, projectId?, { limitCount })` | Histórico paginado (padrão 20) |
+| `getAllUserImportBatches(userId, { limitCount })` | Todos os lotes do usuário |
+| `getImportBatch(batchId)` / `getImportBatchDetails(batchId)` | Detalhe de um lote |
+| `getImportBatchTransactionIds(batchId)` | IDs importados (preferir `importedTransactionIds` do lote) |
 | `markImportBatchUndone(batchId)` | Marca lote como desfeito |
+
+Campos do lote: `importFingerprint`, `periodStart`, `periodEnd`, `counts` (detected/imported/duplicates/ignored/failed), `importedTransactionIds[]`.
 
 ### `purchaseInvoiceService.js`
 
@@ -487,6 +519,14 @@ Parsers: `statementParser.js` (PDF texto), `structuredStatementParser.js` (CSV/O
 | `savePurchaseInvoice(data, projectId?)` | Salva modelo Karonte da nota |
 | `getPurchaseInvoicesForScope(userId, projectId?)` | Lista notas do escopo |
 | `deletePurchaseInvoice(id)` | Remove nota |
+
+### `subscriptionsService.js` / `activityService.js` / `savingsScenariosService.js`
+
+| Serviço | Função principal |
+|---------|------------------|
+| `subscriptionsService` | CRUD de assinaturas confirmadas pelo usuário |
+| `activityService` | Persiste e lista eventos de atividade no escopo |
+| `savingsScenariosService` | Salva cenários de simulação de economia |
 
 ### `budgetService.js`
 
@@ -574,9 +614,12 @@ Dashboard em layout **bento grid** com:
 | Regra 50-30-20 | Barra empilhada (necessidades/desejos/poupança) |
 | Indicadores | Poupança %, uso orçamento %, maior gasto |
 | Análise rápida | Alertas automáticos |
-| Últimos lançamentos | Lista com add/delete |
+| Últimos lançamentos | Lista com busca, filtros (tipo/valor), paginação (20 + carregar mais) |
+| Widgets analytics | Atalhos para fluxo de caixa, comparador e vazamentos |
 
-**Props recebidas de `App.jsx`:** totais, `categoryStats`, `budgetStats`, `ruleStats`, `monthlyEvolutionData`, `calculateForecast`, permissões, callbacks.
+**Busca e filtros:** `searchQuery` (descrição/categoria), `typeFilter` (todos/despesa/receita), `minAmount`/`maxAmount`, botão "Limpar filtros".
+
+**Props recebidas de `App.jsx`:** totais, `categoryStats`, `budgetStats`, `ruleStats`, `monthlyEvolutionData`, `calculateForecast`, permissões, callbacks, `hubAnalytics`.
 
 ### `TransactionDrawer.jsx` — Novo lançamento
 
@@ -644,17 +687,25 @@ Captura erros React; tela de crash com reload. Export default via `AppWrapper` e
 
 | Valor | Título | Descrição |
 |-------|--------|-----------|
-| `'hub'` | Visão Geral | Renderiza `<HubView />` |
+| `'hub'` | Visão Geral | Dashboard com KPIs, gráficos, busca/filtros e widgets analytics |
 | `'budgets'` | Orçamentos | Limites por categoria + cartões (sub-abas: `categories` / `cards`) |
 | `'import'` | Importações | Extratos, notas fiscais e histórico (`ImportHubView`) |
 | `'tarefas'` | Tarefas | Lista de tarefas do projeto ativo (não disponível no Geral) |
+| `'calendar'` | Calendário | Grade mensal com lançamentos, parcelas, recorrentes, faturas e tarefas |
+| `'subscriptions'` | Assinaturas | Detecção e gestão de gastos recorrentes |
+| `'activity'` | Atividades | Feed de ações recentes no escopo |
+| `'simulator'` | Simulador | Projeção de economia por categoria ou assinatura |
+| `'cashflow'` | Fluxo de Caixa | Projeção de saldo e alertas para os próximos meses |
+| `'comparison'` | Comparar | Comparação entre dois períodos (mês vs anterior, ano vs anterior) |
+| `'leaks'` | Vazamentos | Gastos acima da média por categoria ou estabelecimento |
+| `'family'` | Família | Resumo por membro (somente em projetos familiares) |
 | `'userSettings'` | Configurações de Conta | Perfil (somente leitura) |
 | `'projectSettings'` | Configurações do Projeto | Renomear, participantes, convites, excluir (owner) |
 
 ### Navegação
 
-- **Sidebar / bottom nav mobile:** `hub`, `budgets`, `tarefas`, `import` (se `canAddToProject`)
-- **Avatar / perfil:** `userSettings`
+- **Sidebar / bottom nav mobile:** `hub`, `budgets`, `tarefas`, `import` (se `canAddToProject`); analytics e extras no menu lateral
+- **Avatar / perfil:** `userSettings`, atalhos para calendário, assinaturas, atividades, simulador
 - **Ícone ⚙ (owner):** `projectSettings`
 - **Seletor de projeto:** dropdown com Geral + projetos
 - **Sino 🔔:** painel de convites e notificações
@@ -1194,15 +1245,20 @@ Arquivo: `.env.local` (não versionado)
 
 ## 20. Importações (extratos e notas fiscais)
 
-### Fluxo de extrato
+### Fluxo de extrato (otimizado)
 
 1. Usuário seleciona arquivos na aba **Extrato**
-2. `processStatementFiles` extrai transações (parser por formato)
-3. `markDuplicates` compara com lançamentos existentes
-4. Usuário revisa, edita e seleciona linhas
-5. Cada linha vira `addTransaction` com `source: 'statement_import'` e `importBatchId`
-6. `saveImportBatch` registra importadas, ignoradas e falhas
-7. Desfazer: `deleteTransactionsByIds` + `markImportBatchUndone`
+2. `processStatementFiles` extrai transações localmente (parser por formato)
+3. Calcula `periodStart` / `periodEnd` do arquivo
+4. `loadTransactionsForImportWindow` busca **somente a janela** (cache ou Firestore)
+5. `createImportFingerprint` compara com lotes anteriores — avisa reimportação, não bloqueia
+6. `markDuplicates` deduplica **100% em memória** (`importDeduplication.js`)
+7. Usuário revisa, edita e seleciona linhas
+8. `handleStatementImportBatch` → `addTransactionsBatch` (chunks de 450) + atualiza cache local
+9. `saveImportBatch` registra metadados, counts e `importedTransactionIds`
+10. Desfazer: `deleteTransactionsByIds` (batch) + `markImportBatchUndone` + remove do cache
+
+**Regras:** sem consulta linha a linha; sem reload global; arquivo bruto e texto extraído **não são persistidos**.
 
 ### Formatos de extrato
 
@@ -1223,18 +1279,144 @@ Arquivo: `.env.local` (não versionado)
 
 ### Histórico
 
-Coleção `importBatches` permite ver, por lote:
+Coleção `importBatches` exibe **apenas metadados** por padrão (20 lotes + "Carregar mais"):
 
-- Quantas transações foram **importadas**
-- Quais ficaram **fora** (não selecionadas, duplicadas, erro)
+- Quantas transações foram **importadas** / **duplicadas** / **ignoradas** / **falharam**
+- Fingerprint e período do arquivo
 - **Desfazer** importação (requer `canDeleteInProject` em projetos compartilhados)
+- Transações do lote carregadas **somente** ao clicar "Ver detalhes"
+
+Se o histórico estiver vazio mas existirem transações importadas, `importBatchBackfill.js` reconstrói lotes a partir das transações.
 
 ### Deploy
 
-Após atualizar o app, publique as regras Firestore:
+Após atualizar o app, publique regras e índices Firestore:
 
 ```bash
 firebase deploy --only firestore:rules
+firebase deploy --only firestore:indexes
+```
+
+Consulte [`docs/firestore-indexes.md`](./docs/firestore-indexes.md) para a lista completa de índices compostos.
+
+---
+
+## 21. Analytics e inteligência financeira
+
+Três views analíticas acessíveis pela sidebar e por widgets no Hub. Todas operam **em memória** sobre a janela de transações já carregada (últimos 18 meses no fetch principal; gráficos usam 6 meses).
+
+### Fluxo de caixa (`CashFlowForecastView`, `'cashflow'`)
+
+Utilitário: `src/utils/cashFlowForecast.js`
+
+- Projeta saldo para os próximos meses com base em recorrentes, parcelas, assinaturas e baseline de despesas variáveis
+- Alertas: saldo negativo, gastos > receitas, crescimento de categoria >25%, cartão próximo/ acima do limite
+- Gráfico Recharts com breakdown por tipo de projeção
+
+### Comparador de períodos (`PeriodComparisonView`, `'comparison'`)
+
+Utilitário: `src/utils/periodComparison.js`
+
+- Presets: mês atual vs anterior, ano vs ano anterior
+- Com tabula receitas, despesas, saldo, taxa de poupança, uso de orçamento e cartões
+- Insights automáticos em PT-BR; gráfico de categorias com maior variação
+
+### Detector de vazamentos (`FinancialLeaksView`, `'leaks'`)
+
+Utilitário: `src/utils/financialLeakDetector.js`
+
+- Detecta categorias e estabelecimentos com gasto acima da média dos últimos 3 meses
+- Severidade: moderada (≥20%), alta (≥40%), crítica (≥60%)
+- Relatório com excesso mensal e economia anual potencial
+
+---
+
+## 22. Calendário, assinaturas, família e simulador
+
+### Calendário financeiro (`FinancialCalendarView`, `'calendar'`)
+
+Utilitário: `src/utils/financialCalendar.js`
+
+- Grade mensal com lançamentos confirmados, parcelas futuras, recorrentes, vencimentos de fatura e tarefas
+- Tipos de evento: `income`, `expense`, `installment`, `recurring`, `card_invoice`, `task`
+- Totais por dia e resumo do mês
+
+### Assinaturas (`SubscriptionsView`, `'subscriptions'`)
+
+Utilitários: `subscriptionDetection.js`, `subscriptionsService.js`
+
+- Detecção automática de gastos recorrentes por descrição/valor similares
+- Confiança: alta/média/baixa; usuário confirma ou ignora
+- Estatísticas: total mensal, anual, assinatura mais cara
+
+### Modo família (`FamilyModeView`, `'family'`)
+
+Utilitário: `src/utils/familyModeCalculations.js`
+
+- Disponível em projetos marcados como familiares (`isFamilyProject`)
+- Gastos por membro, participação percentual, top categorias, uso de orçamento compartilhado
+
+### Simulador de economia (`SavingsSimulatorView`, `'simulator'`)
+
+Utilitários: `savingsSimulator.js`, `savingsScenariosService.js`
+
+- Simula redução percentual ou fixa em categorias ou assinaturas
+- Impacto na taxa de poupança; cenários salvos no Firestore
+
+### Feed de atividades (`ActivityFeedView`, `'activity'`)
+
+Utilitários: `activityLog.js`, `activityService.js`
+
+- Registra e exibe ações recentes: lançamentos, tarefas, importações, convites
+
+---
+
+## 23. Performance Firestore (cache, batch, dedup)
+
+### Objetivo
+
+Reduzir leituras e gravações no Firestore sem limitar importações grandes nem funcionalidades.
+
+### Cache local por escopo (`src/utils/dataCache.js`)
+
+- Chave: `userId:projectId` (ou `userId:geral`)
+- Cacheia transações por janela de datas, lotes de importação, cartões, orçamentos e tarefas
+- Write-through: add/edit/delete/import atualizam o cache sem reload global
+- Trocar mês ou projeto reaproveita dados já carregados
+
+### Carregamento por janela (`src/utils/transactionLoader.js`)
+
+- Fetch principal: últimos **18 meses** via `loadTransactionsForScope`
+- Importação: `loadTransactionsForImportWindow` busca só o período do arquivo
+- Gráficos do Hub: últimos **6 meses** em memória (`useFinanceDerived.js`)
+
+### Queries indexadas (`transactionService.js`)
+
+- Proibido: `getDocs(collection)` sem filtros
+- Todas as consultas usam `userId` ou `projectId` + intervalo de datas ou `importBatchId`
+- Escopo Geral faz over-fetch e filtra client-side (`!projectId || projectId === 'geral'`)
+
+### Escrita em batch
+
+- `addTransactionsBatch`: até 450 operações por chunk (`writeBatch`)
+- `deleteTransactionsByIds`: mesmo padrão para desfazer importação
+
+### Deduplicação e fingerprint
+
+- `importDeduplication.js`: índices `byDuplicateHash`, `byDateAmount`, `byImportBatchId`
+- `importFingerprint.js`: detecta reimportação do mesmo arquivo; avisa sem bloquear
+
+### Debug (somente DEV)
+
+- `firestoreDebug.js`: logs `[Firestore READ/WRITE/QUERY]` quando `import.meta.env.DEV`
+- `FirestoreUsageDebugPanel.jsx`: painel flutuante com métricas da sessão
+
+### Índices Firestore
+
+Arquivo `firestore.indexes.json` + documentação em [`docs/firestore-indexes.md`](./docs/firestore-indexes.md).
+
+```bash
+firebase deploy --only firestore:indexes
 ```
 
 ---
@@ -1263,7 +1445,8 @@ firebase deploy --only firestore:rules
 | `getCategoryBudgetInfo` | % orçamento por categoria |
 | `getCardInvoiceStats` | Fatura do cartão |
 | `exportToCSV` | Download relatório |
-| `handleStatementImport` | Salva transação importada de extrato |
+| `handleStatementImportBatch` | Importação em batch + cache local |
+| `fetchTransactionsForImportWindow` | Busca janela para dedup na importação |
 | `handleImportBatchComplete` | Persiste lote em `importBatches` |
 | `handleSaveInvoice` | Nota fiscal + despesa vinculada |
 | `handleUndoImport` | Desfaz lote de importação |
@@ -1286,14 +1469,16 @@ firebase deploy --only firestore:rules
 | `[]` | `onAuthStateChanged` — sessão Firebase |
 | `[currentUser]` | Projetos, convites, notificações |
 | `[currentUser, activeProjectId]` | Tarefas do projeto |
-| `[currentUser, activeProjectId, projects]` | Transações, orçamentos, categorias, cartões, usuários (admin) |
+| `[currentUser, activeProjectId, projects]` | `loadTransactionsForScope` (18 meses), orçamentos, categorias, cartões |
 | `[currentUser]` (2º) | `persistMissingRecurrences` para lançamentos recorrentes |
 | `[chatOpen, transactions]` | Alerta proativo de previsão alta no chat |
 | `[currentUser, transactions.length, dataLoading]` | Insight mensal automático |
 
+> **Importante:** efeitos de fetch dependem de `currentUser.uid`, `activeProjectId` e `projects` — **não** de arrays `transactions` recriados, evitando loops de reload.
+
 ---
 
-## 21. Refatoração em andamento (prioridades técnicas)
+## 24. Refatoração em andamento (prioridades técnicas)
 
 ### Fase 1 — Concluída
 
