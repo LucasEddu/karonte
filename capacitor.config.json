@@ -3,7 +3,7 @@
   "appName": "Karonte",
   "webDir": "dist",
   "server": {
-    "url": "http://192.168.100.48:5173",
+    "url": "http://SEU_IP_LOCAL:5173",
     "cleartext": true
   }
 }

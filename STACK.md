@@ -53,7 +53,7 @@ batch e deduplicação por fingerprint nas importações. Arquivos importados s�
 
 ## 8. Restrições conhecidas
 
-- `capacitor.config.json` aponta `server.url` para um servidor de desenvolvimento na rede local (cleartext): serve só para testes,
+- `capacitor.config.json` traz `server.url` como placeholder (`SEU_IP_LOCAL`): troque pelo IP da sua máquina na rede local para testar no aparelho (cleartext, só desenvolvimento),
   precisa ser removido para gerar um app de produção.
 - Pendências funcionais listadas na seção 19 do `DOCUMENTACAO.md` (ex.: coleção `insights` sem regra, iOS não criado).
 - `App.jsx` ainda concentra muita lógica (refatoração em andamento).
